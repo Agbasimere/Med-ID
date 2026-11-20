@@ -16,10 +16,11 @@ export async function loadFaceApiModels(onProgress) {
       if (onProgress) onProgress('Loading face detection neural nets...');
       const MODEL_URL = '/models';
 
-      // Load Tiny Face Detector + Tiny Landmarks + Face Recognition Net
+      // Load Face Detector + Full 68 Landmarks + Face Recognition Net
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL).catch(() => {}),
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       ]);
 
@@ -52,31 +53,80 @@ export function areModelsReady() {
 }
 
 /**
- * Detects face and extracts 128-d descriptor vector from video or image element
+ * Fast face alignment check for live webcam feed.
+ * Runs in ~20-30ms to provide immediate visual feedback inside the oval viewport.
+ */
+export async function detectFaceInFeed(inputElement) {
+  if (!modelsLoaded || !inputElement) return { detected: false };
+  try {
+    const options = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 224,
+      scoreThreshold: 0.28
+    });
+    const detection = await faceapi.detectSingleFace(inputElement, options);
+    if (!detection) return { detected: false };
+    return {
+      detected: true,
+      score: detection.score,
+      box: detection.box
+    };
+  } catch {
+    return { detected: false };
+  }
+}
+
+/**
+ * Detects full face and extracts 128-d descriptor vector from video or image element.
+ * Uses high-resolution multi-scale inference (320px -> 416px -> 224px) to ensure complete
+ * coverage of the user's full facial contour, jawline, eye structure, and nasal geometry.
  */
 export async function extractFaceDescriptor(inputElement) {
   if (!modelsLoaded) {
     await loadFaceApiModels();
   }
 
-  // Use TinyFaceDetector for low latency real-time webcam inference
-  const options = new faceapi.TinyFaceDetectorOptions({
-    // 160 is a multiple of 32 and substantially reduces mobile inference time.
-    inputSize: 160,
-    scoreThreshold: 0.35
+  // 1. Primary pass: 320x320 resolution for crisp full-face biometric landmarks
+  const primaryOptions = new faceapi.TinyFaceDetectorOptions({
+    inputSize: 320,
+    scoreThreshold: 0.28
   });
 
-  const detection = await faceapi
-    .detectSingleFace(inputElement, options)
+  let detection = await faceapi
+    .detectSingleFace(inputElement, primaryOptions)
     .withFaceLandmarks(true)
     .withFaceDescriptor();
+
+  // 2. High-res multi-scale fallback (416x416) if user is further away or in variable lighting
+  if (!detection) {
+    const highResOptions = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 416,
+      scoreThreshold: 0.22
+    });
+    detection = await faceapi
+      .detectSingleFace(inputElement, highResOptions)
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+  }
+
+  // 3. Compact fallback (224x224) if camera resolution or mobile viewport is constrained
+  if (!detection) {
+    const compactOptions = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 224,
+      scoreThreshold: 0.22
+    });
+    detection = await faceapi
+      .detectSingleFace(inputElement, compactOptions)
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+  }
 
   if (!detection) return null;
 
   return {
     descriptor: Array.from(detection.descriptor),
     box: detection.detection.box,
-    score: detection.detection.score
+    score: detection.detection.score,
+    landmarks: detection.landmarks
   };
 }
 

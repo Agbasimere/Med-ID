@@ -8,10 +8,11 @@ import {
   X, 
   Sparkles,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  User
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { extractFaceDescriptor, captureVideoFrame, loadFaceApiModels } from '../lib/faceRecognition';
+import { extractFaceDescriptor, captureVideoFrame, loadFaceApiModels, detectFaceInFeed } from '../lib/faceRecognition';
 import { savePatientBiometrics } from '../lib/supabase';
 import { startCameraStream, stopCameraStream } from '../lib/camera';
 
@@ -29,6 +30,33 @@ export default function FaceEnrollmentModal({
   const [success, setSuccess] = useState(false);
   const [modelsReady, setModelsReady] = useState(false);
   const [facingMode, setFacingMode] = useState('user');
+  const [faceAligned, setFaceAligned] = useState(false);
+
+  // Live face alignment tracker
+  useEffect(() => {
+    if (!isOpen || !streamActive || capturing || success) {
+      setFaceAligned(false);
+      return;
+    }
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      if (!videoRef.current || videoRef.current.paused || capturing) return;
+      try {
+        const check = await detectFaceInFeed(videoRef.current);
+        if (isMounted) {
+          setFaceAligned(Boolean(check?.detected));
+        }
+      } catch {
+        // ignore live tracking errors
+      }
+    }, 450);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [isOpen, streamActive, capturing, success]);
 
   useEffect(() => {
     if (isOpen) {
@@ -201,37 +229,94 @@ export default function FaceEnrollmentModal({
           </div>
         )}
 
-        {/* Live Camera Box with Face Oval Guide */}
-        <div className="relative aspect-video w-full rounded-2xl bg-slate-950 overflow-hidden border border-slate-800 flex items-center justify-center mb-5">
+        {/* Live Camera Box with Biometric Oval Aperture */}
+        <div className="relative w-full rounded-3xl bg-slate-950 min-h-[420px] overflow-hidden border border-slate-800 flex flex-col justify-between p-4 mb-4 select-none">
           <video
             ref={videoRef}
             playsInline
             muted
-            className={`w-full h-full object-cover ${streamActive ? 'block' : 'hidden'}`}
+            className={`absolute inset-0 w-full h-full object-cover ${streamActive ? 'block' : 'hidden'}`}
           />
 
+          {/* Top HUD Bar */}
+          <div className="relative z-20 flex items-center justify-between w-full">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-lime-400 text-slate-950 font-black text-[11px] uppercase tracking-wider shadow-sm shadow-lime-400/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-pulse" />
+              128-D BIOMETRIC ENGINE
+            </span>
+            <button 
+              type="button" 
+              onClick={switchCamera} 
+              disabled={!streamActive || capturing} 
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs font-semibold backdrop-blur-md border border-slate-800 transition disabled:opacity-50"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Flip</span>
+            </button>
+          </div>
+
           {!streamActive && (
-            <div className="text-center p-6 text-slate-400">
-              <Camera className="w-10 h-10 mx-auto mb-2 text-slate-500" />
-              <p className="text-xs">Starting camera feed...</p>
+            <div className="relative z-20 text-center p-8 text-slate-400 my-auto">
+              <Camera className="w-10 h-10 mx-auto mb-2 text-lime-400 animate-pulse" />
+              <p className="text-xs font-semibold text-slate-300">Initializing biometric camera…</p>
             </div>
           )}
 
-          {/* Alignment Oval Guide */}
+          {/* Alignment Oval Aperture Mask */}
           {streamActive && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="w-48 h-60 border-2 border-dashed border-brand-400/70 rounded-[50%] shadow-[0_0_20px_rgba(2,132,199,0.3)] flex items-center justify-center">
-                <span className="text-[10px] font-mono font-bold text-brand-300 bg-slate-950/70 px-2 py-0.5 rounded">
-                  ALIGN FACE HERE
-                </span>
+            <div className="relative z-10 my-2 flex flex-col items-center justify-center pointer-events-none">
+              <div className="relative">
+                {/* Corner target reticles */}
+                <div className="absolute -top-3 -left-3 w-5 h-5 border-t-2 border-l-2 border-lime-400/80 rounded-tl-lg" />
+                <div className="absolute -top-3 -right-3 w-5 h-5 border-t-2 border-r-2 border-lime-400/80 rounded-tr-lg" />
+                <div className="absolute -bottom-3 -left-3 w-5 h-5 border-b-2 border-l-2 border-lime-400/80 rounded-bl-lg" />
+                <div className="absolute -bottom-3 -right-3 w-5 h-5 border-b-2 border-r-2 border-lime-400/80 rounded-br-lg" />
+
+                {/* Oval Mask */}
+                <div className={`w-56 h-72 sm:w-64 sm:h-84 rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture ${
+                  faceAligned ? 'border-lime-400 ring-4 ring-lime-400/25 active' : 'border-lime-400/60'
+                }`}>
+                  {capturing && (
+                    <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-lime-400 to-transparent shadow-[0_0_15px_#a3e635] animate-biometric-laser z-20" />
+                  )}
+
+                  <div className="absolute inset-0 flex flex-col items-center justify-between p-5 opacity-30 pointer-events-none">
+                    <div className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+                    <div className="w-10 h-10 rounded-full border border-dashed border-lime-400" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Chip */}
+              <div className="mt-3 pointer-events-auto">
+                {capturing ? (
+                  <span className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 text-xs font-semibold backdrop-blur-md animate-pulse">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                    <span>Extracting 128-D landmarks…</span>
+                  </span>
+                ) : faceAligned ? (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-lime-950/90 text-lime-300 border border-lime-500/60 text-xs font-semibold backdrop-blur-md">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-lime-400" />
+                    <span>Full face detected — hold steady</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-900/90 text-slate-300 border border-slate-700 text-xs font-medium backdrop-blur-md">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    <span>Position face inside the oval</span>
+                  </span>
+                )}
               </div>
             </div>
           )}
-        </div>
 
-        <button type="button" onClick={switchCamera} disabled={!streamActive || capturing} className="w-full mb-4 text-xs text-brand-700 hover:text-brand-900 disabled:opacity-50">
-          Switch to {facingMode === 'user' ? 'rear' : 'front'} camera
-        </button>
+          {/* Bottom Guidance */}
+          <div className="relative z-20 text-center">
+            <p className="text-[11px] text-slate-400">
+              Look directly into the camera with good lighting so neural nets can map full facial contour.
+            </p>
+          </div>
+        </div>
 
         {/* Action Controls */}
         <div className="space-y-3">
@@ -239,22 +324,22 @@ export default function FaceEnrollmentModal({
             type="button"
             onClick={handleCaptureAndEnroll}
             disabled={capturing || !streamActive || !modelsReady || success}
-            className="w-full corporate-btn-brand !py-3 !text-sm gap-2 disabled:opacity-50 shadow-md shadow-brand-500/20"
+            className="w-full py-3.5 px-6 rounded-2xl bg-lime-500 hover:bg-lime-400 text-slate-950 font-black text-sm transition-all shadow-lg shadow-lime-500/25 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {capturing ? (
               <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
                 <span>Extracting Biometrics & Saving...</span>
               </>
             ) : success ? (
               <>
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <CheckCircle2 className="w-4 h-4 text-slate-950" />
                 <span>Enrolled Successfully!</span>
               </>
             ) : (
               <>
-                <Camera className="w-4 h-4" />
-                <span>{modelsReady ? 'Capture & Save Emergency Biometrics' : 'Preparing face verification…'}</span>
+                <Camera className="w-4 h-4 text-slate-950" />
+                <span>{modelsReady ? 'Capture & Save Emergency Biometrics' : 'Preparing biometric engine…'}</span>
               </>
             )}
           </button>

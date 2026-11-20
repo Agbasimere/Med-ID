@@ -29,7 +29,8 @@ import {
 import confetti from 'canvas-confetti';
 import { 
   loadFaceApiModels, 
-  extractFaceDescriptor
+  extractFaceDescriptor,
+  detectFaceInFeed
 } from '../lib/faceRecognition';
 import { 
   verifyHardwareFingerprint, 
@@ -74,6 +75,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
   const [isContinuousFaceScan, setIsContinuousFaceScan] = useState(false);
   const [isAnalyzingFace, setIsAnalyzingFace] = useState(false);
   const [faceAlert, setFaceAlert] = useState(null);
+  const [faceAligned, setFaceAligned] = useState(false);
 
   // Scanner state (device authenticator)
   const [hasHardwareBiometrics, setHasHardwareBiometrics] = useState(true);
@@ -271,7 +273,34 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     setIsContinuousFaceScan(false);
     setScannerStatusText('CAMERA STANDBY');
     setFaceAlert(null);
+    setFaceAligned(false);
   };
+
+  // Live face alignment tracker (runs lightweight detection to guide user positioning)
+  useEffect(() => {
+    if (!streamActive || activeModality !== 'face') {
+      setFaceAligned(false);
+      return;
+    }
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      if (!videoRef.current || videoRef.current.paused || isAnalyzingFace) return;
+      try {
+        const check = await detectFaceInFeed(videoRef.current);
+        if (isMounted) {
+          setFaceAligned(Boolean(check?.detected));
+        }
+      } catch {
+        // ignore live tracking errors
+      }
+    }, 450);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [streamActive, activeModality, isAnalyzingFace]);
 
   // 2. Camera Controls (Face Biometric)
   const startCamera = async (requestedFacingMode = facingMode) => {
@@ -887,144 +916,216 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
             </div>
           )}
 
-          {/* MODALITY 2: FACE SCANNER (With Manual Trigger by Default) */}
+          {/* MODALITY 2: FACE SCANNER (With High-Resolution Oval Aperture UI) */}
           {activeModality === 'face' && (
-            <div className="corporate-card p-6 bg-white border border-slate-200/90 shadow-sm space-y-4">
+            <div className="corporate-card overflow-hidden bg-white border border-slate-200/90 shadow-sm">
               
-              <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-100">
+              {/* Header Status Bar */}
+              <div className="flex items-center justify-between text-xs p-4 sm:p-5 border-b border-slate-100">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${streamActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                  <span className="font-semibold text-slate-700">
-                    {streamActive ? 'LIVE VIDEO FEED ACTIVE' : 'CAMERA STANDBY'}
+                  <span className={`w-2.5 h-2.5 rounded-full ${streamActive ? 'bg-lime-500 animate-pulse' : 'bg-slate-400'}`} />
+                  <span className="font-bold text-slate-800">
+                    {streamActive ? 'BIOMETRIC CAMERA ACTIVE' : 'BIOMETRIC CAMERA STANDBY'}
                   </span>
                 </div>
-                <div className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-brand-500" />
-                  <span>128-D CLIENT-SIDE NEURAL MATCHER</span>
+                <div className="text-[11px] font-mono text-slate-500 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-lime-600" />
+                  <span className="font-semibold text-slate-700">128-D FULL FACE LANDMARK ENGINE</span>
                 </div>
               </div>
 
               {faceAlert && (
-                <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 animate-fadeIn ${
-                  faceAlert.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-rose-50 border-rose-200 text-rose-800'
-                }`}>
-                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold block">{faceAlert.title}</span>
-                    <p className="text-[11px] mt-0.5">{faceAlert.text}</p>
+                <div className="p-4 border-b border-slate-100">
+                  <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 animate-fadeIn ${
+                    faceAlert.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}>
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block">{faceAlert.title}</span>
+                      <p className="text-[11px] mt-0.5">{faceAlert.text}</p>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Video Viewport */}
-              <div className="relative aspect-video w-full rounded-2xl bg-slate-100/80 border-2 border-slate-200 overflow-hidden flex items-center justify-center">
-                
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover ${streamActive ? 'block' : 'hidden'}`}
-                />
+              {/* Viewport Area */}
+              {!streamActive ? (
+                /* SCREEN 1: PRE-SCAN INSTRUCTION VIEW (Matching design specification) */
+                <div className="p-8 sm:p-12 text-center space-y-6 max-w-md mx-auto">
+                  {/* Subtle top indicator bar */}
+                  <div className="w-24 h-1 bg-lime-400 rounded-full mx-auto" />
 
-                {!streamActive && (
-                  <div className="text-center p-6 space-y-3">
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-sm mx-auto flex items-center justify-center text-brand-600">
-                      <Camera className="w-8 h-8" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-800">Face Scanner Standby</h4>
-                      <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
-                        Click "Start Camera Feed" to preview patient, then click "Scan Patient Face" to verify.
-                      </p>
+                  {/* Header text */}
+                  <div>
+                    <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                      Private Photo Verification
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1.5">
+                      Fast 128-dimensional biometric facial landmark recognition for emergency trauma triage.
+                    </p>
+                  </div>
+
+                  {/* Center Face Graphic with Corner Brackets */}
+                  <div className="relative w-36 h-36 mx-auto flex items-center justify-center my-4">
+                    {/* Reticle corner target brackets */}
+                    <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-slate-800 rounded-tl-lg" />
+                    <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-slate-800 rounded-tr-lg" />
+                    <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-slate-800 rounded-bl-lg" />
+                    <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-slate-800 rounded-br-lg" />
+                    
+                    {/* Center stylized user head icon with lime accent */}
+                    <div className="w-20 h-20 rounded-2xl bg-lime-50 border border-lime-200 flex flex-col items-center justify-center text-lime-700 shadow-sm">
+                      <User className="w-10 h-10 text-lime-600" />
                     </div>
                   </div>
-                )}
 
-                {streamActive && (
-                  <div className="absolute inset-0 pointer-events-none">
-                    <div className="absolute inset-12 sm:inset-16 border-2 border-brand-500/50 rounded-2xl scan-reticle flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-brand-500 to-transparent shadow-[0_0_8px_#0284c7] animate-scan-line" />
-                    </div>
-
-                    <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono bg-slate-900/90 text-white backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700">
-                      <span className="truncate max-w-[75%] font-semibold">
-                        STATUS: {scannerStatusText}
-                      </span>
-                      <span className="text-brand-400 font-bold">MED-ID FACE</span>
-                    </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-slate-900">Look into the camera</h4>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                      Hold still so the neural network can map your full face landmarks, contour, and eyes.
+                    </p>
                   </div>
-                )}
 
-              </div>
+                  {/* Primary Start Verification Button (Vibrant Lime) */}
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    disabled={loadingModels}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-lime-500 hover:bg-lime-400 text-slate-950 font-black text-sm transition-all shadow-lg shadow-lime-500/25 active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    <Camera className="w-4 h-4 text-slate-950" />
+                    <span>{loadingModels ? 'Preparing biometric engine…' : 'Start verification'}</span>
+                  </button>
+                </div>
+              ) : (
+                /* SCREEN 2: ACTIVE BIOMETRIC VIEWFINDER (Dark Oval Porthole HUD) */
+                <div className="relative w-full bg-slate-950 min-h-[480px] sm:min-h-[540px] flex flex-col justify-between p-4 sm:p-6 overflow-hidden select-none">
+                  
+                  {/* Underneath: The Live Full-Resolution Camera Feed */}
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
 
-              {/* Camera Control Toolbar */}
-              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {!streamActive ? (
+                  {/* Top HUD Controls */}
+                  <div className="relative z-20 flex items-center justify-between w-full">
                     <button
                       type="button"
-                      onClick={startCamera}
-                      disabled={loadingModels}
-                      className="corporate-btn-primary !py-2.5 !px-5 !text-xs gap-1.5"
+                      onClick={handleCancelScan}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs font-semibold backdrop-blur-md border border-slate-800 transition"
                     >
-                      <Camera className="w-4 h-4" />
-                      <span>Start Camera Feed</span>
+                      <CameraOff className="w-3.5 h-3.5" />
+                      <span>Exit camera</span>
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleManualFaceScan}
-                        disabled={isAnalyzingFace}
-                        className="corporate-btn-emergency !py-2.5 !px-5 !text-xs gap-2 shadow-md shadow-emergency-600/30"
-                      >
-                        {isAnalyzingFace ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>Analyzing Face...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Scan className="w-4 h-4" />
-                            <span>Scan & Identify Patient Face</span>
-                          </>
+
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-lime-400 text-slate-950 font-black text-[11px] uppercase tracking-wider shadow-sm shadow-lime-400/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-pulse" />
+                      LIVE HUD
+                    </span>
+                  </div>
+
+                  {/* Center: The Biometric Oval Aperture (Casts 9999px Dark Backdrop Mask Outside) */}
+                  <div className="relative z-10 my-4 flex flex-col items-center justify-center pointer-events-none">
+                    
+                    {/* The Oval Frame with Glowing Aperture */}
+                    <div className="relative">
+                      {/* Corner target reticles framing the oval */}
+                      <div className="absolute -top-3 -left-3 w-6 h-6 border-t-2 border-l-2 border-lime-400/80 rounded-tl-lg" />
+                      <div className="absolute -top-3 -right-3 w-6 h-6 border-t-2 border-r-2 border-lime-400/80 rounded-tr-lg" />
+                      <div className="absolute -bottom-3 -left-3 w-6 h-6 border-b-2 border-l-2 border-lime-400/80 rounded-bl-lg" />
+                      <div className="absolute -bottom-3 -right-3 w-6 h-6 border-b-2 border-r-2 border-lime-400/80 rounded-br-lg" />
+
+                      {/* Oval Cutout Mask */}
+                      <div className={`w-60 h-80 sm:w-68 sm:h-92 rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture ${
+                        faceAligned ? 'border-lime-400 ring-4 ring-lime-400/25 active' : 'border-lime-400/60'
+                      }`}>
+                        
+                        {/* Animated Laser Sweep when analyzing */}
+                        {isAnalyzingFace && (
+                          <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-lime-400 to-transparent shadow-[0_0_15px_#a3e635] animate-biometric-laser z-20" />
                         )}
-                      </button>
 
-                      <button
-                        type="button"
-                        onClick={stopCamera}
-                        className="corporate-btn-secondary !py-2.5 !px-3.5 !text-xs gap-1.5"
-                      >
-                        <CameraOff className="w-4 h-4 text-slate-600" />
-                        <span>Stop</span>
-                      </button>
+                        {/* Subtle Face Alignment Guide Overlay */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-between p-6 opacity-30 pointer-events-none">
+                          <div className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+                          <div className="w-12 h-12 rounded-full border border-dashed border-lime-400" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+                        </div>
+                      </div>
+                    </div>
 
+                    {/* Real-Time Alignment Status Badge */}
+                    <div className="mt-4 pointer-events-auto">
+                      {isAnalyzingFace ? (
+                        <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 text-xs font-semibold backdrop-blur-md animate-pulse">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                          <span>Reading 128-D facial landmarks…</span>
+                        </span>
+                      ) : faceAligned ? (
+                        <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-lime-950/90 text-lime-300 border border-lime-500/60 text-xs font-semibold backdrop-blur-md animate-fadeIn">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-lime-400" />
+                          <span>Full face detected — hold steady</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-900/90 text-slate-300 border border-slate-700 text-xs font-medium backdrop-blur-md">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                          <span>Fit face inside the oval frame</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bottom Controls Bar */}
+                  <div className="relative z-20 space-y-3 w-full max-w-sm mx-auto">
+                    
+                    {/* Primary High-Contrast Lime Button */}
+                    <button
+                      type="button"
+                      onClick={handleManualFaceScan}
+                      disabled={isAnalyzingFace}
+                      className="w-full py-3.5 px-6 rounded-2xl bg-lime-500 hover:bg-lime-400 text-slate-950 font-black text-sm transition-all shadow-lg shadow-lime-500/25 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {isAnalyzingFace ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                          <span>Analyzing Facial Landmarks…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Scan className="w-4 h-4 text-slate-950" />
+                          <span>Scan & Identify Patient Face</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Secondary Actions */}
+                    <div className="flex items-center justify-between px-1 text-xs">
                       <button
                         type="button"
                         onClick={toggleCameraFacing}
-                        className="corporate-btn-secondary !py-2.5 !px-3.5 !text-xs gap-1.5"
+                        className="text-slate-400 hover:text-white flex items-center gap-1.5 transition"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Flip</span>
+                        <span>Flip camera</span>
                       </button>
-                    </>
-                  )}
-                </div>
 
-                {/* Continuous Mode Toggle */}
-                {streamActive && (
-                  <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={isContinuousFaceScan}
-                      onChange={(e) => setIsContinuousFaceScan(e.target.checked)}
-                      className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                    />
-                    <span>Continuous Auto-Identify Mode</span>
-                  </label>
-                )}
-              </div>
+                      <label className="flex items-center gap-2 text-slate-300 cursor-pointer select-none text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={isContinuousFaceScan}
+                          onChange={(e) => setIsContinuousFaceScan(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-900 text-lime-500 focus:ring-lime-500"
+                        />
+                        <span>Continuous auto-scan</span>
+                      </label>
+                    </div>
+
+                  </div>
+
+                </div>
+              )}
 
             </div>
           )}
