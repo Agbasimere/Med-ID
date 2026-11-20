@@ -284,14 +284,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
         photo: capturedPhoto
       };
 
-      if (!intakeAlreadySaved) {
-        await saveInitialPatientIntake(currentUser.id, {
-          dob, sex, bloodType, genotype, nationality, homeAddress,
-          allergies, conditions, medications, surgeries, medicalHistory,
-          emergName, emergPhone, emergEmail, whatsappOptIn
-        });
-      }
-
+      // Save identity, medical history, emergency contact, and biometrics
       await updatePatientProfile(currentUser.id, {
         full_name: fullName || currentUser?.user_metadata?.full_name || '',
         dob,

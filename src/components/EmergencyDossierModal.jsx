@@ -340,27 +340,15 @@ export default function EmergencyDossierModal({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {patient.emerg_phone ? (
-                <>
-                  <button 
-                    type="button" 
-                    onClick={handleWhatsApp} 
-                    disabled={whatsappBusy || whatsappSent} 
-                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50 shadow-sm"
-                  >
-                    <MessageCircle className="h-4 w-4 text-emerald-600" />
-                    <span>{whatsappBusy ? 'Sending Cloud Alert…' : whatsappSent ? 'Cloud Alert Sent' : 'Send WhatsApp Alert'}</span>
-                  </button>
-
-                  <a 
-                    href={getDirectWhatsAppUrl()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    <span>Open in WhatsApp</span>
-                  </a>
-                </>
+                <a 
+                  href={getDirectWhatsAppUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span>Open in WhatsApp</span>
+                </a>
               ) : (
                 <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">
                   No emergency phone registered

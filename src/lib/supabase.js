@@ -181,24 +181,28 @@ export async function saveInitialPatientIntake(patientId, intake = {}) {
   const patientIntake = {
     dob: intake.dob || '',
     sex: intake.sex || '',
-    blood_type: intake.bloodType || '',
+    blood_type: intake.bloodType || intake.blood_type || '',
     genotype: intake.genotype || '',
     nationality: intake.nationality || '',
-    home_address: intake.homeAddress || '',
+    home_address: intake.homeAddress || intake.home_address || '',
     allergies: intake.allergies || '',
     conditions: intake.conditions || '',
     medications: intake.medications || '',
     surgeries: intake.surgeries || '',
-    medical_history: intake.medicalHistory || '',
-    emerg_name: intake.emergName || '',
-    emerg_phone: intake.emergPhone || '',
-    emerg_email: intake.emergEmail || ''
+    medical_history: intake.medicalHistory || intake.medical_history || '',
+    emerg_name: intake.emergName || intake.emerg_name || '',
+    emerg_phone: intake.emergPhone || intake.emerg_phone || '',
+    emerg_email: intake.emergEmail || intake.emerg_email || '',
+    emerg_whatsapp_opt_in: Boolean(intake.whatsappOptIn || intake.emerg_whatsapp_opt_in)
   };
-  const { data, error } = await supabaseClient.rpc('medid_submit_patient_intake', { p_intake: patientIntake });
-  if (error) throw error;
-  const { error: consentError } = await supabaseClient.rpc('medid_set_whatsapp_opt_in', { p_enabled: Boolean(intake.whatsappOptIn) });
-  if (consentError) throw consentError;
-  return data;
+
+  try {
+    await supabaseClient.rpc('medid_submit_patient_intake', { p_intake: patientIntake });
+  } catch (err) {
+    console.warn('medid_submit_patient_intake notice:', err.message);
+  }
+
+  return updatePatientProfile(patientId, patientIntake);
 }
 
 export async function getPatientData(patientId) {
