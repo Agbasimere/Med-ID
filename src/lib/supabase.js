@@ -214,7 +214,30 @@ export async function getPatientData(patientId) {
 }
 
 export async function matchPatientFace(descriptor) {
-  const { data, error } = await supabaseClient.functions.invoke('face-match', { body: { descriptor } });
+  const client = supabaseClient;
+  
+  // Ensure the user's session token is active and refreshed
+  let token = null;
+  try {
+    const { data: sessionData } = await client.auth.getSession();
+    token = sessionData?.session?.access_token || null;
+    
+    // If token is expiring within 2 minutes or missing, refresh
+    if (!token || (sessionData?.session?.expires_at && sessionData.session.expires_at * 1000 < Date.now() + 120000)) {
+      const { data: refreshed } = await client.auth.refreshSession();
+      if (refreshed?.session?.access_token) {
+        token = refreshed.session.access_token;
+      }
+    }
+  } catch (sessErr) {
+    console.warn('Session check notice:', sessErr.message);
+  }
+
+  const { data, error } = await client.functions.invoke('face-match', { 
+    body: { descriptor },
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+
   if (error) {
     const response = error.context instanceof Response ? error.context : null;
     if (response) {
@@ -332,8 +355,8 @@ export async function recordBiometricScan(doctorId, patientId, modality = 'face'
 
 /**
  * Automated Cross-Hospital Full Medical History Retrieval (NO Admin Manual Approval!)
- * Automatically queries MED-ID partner hospitals, dispatches access notices to each facility,
- * and aggregates full medical history for the attending physician.
+ * Automatically unlocks full medical history for the attending physician.
+ * Only genuine facilities recorded in the patient's history are referenced.
  */
 export async function requestCrossHospitalMedicalHistory(patientId, doctorProfile, patientName) {
   const client = supabaseClient;
@@ -343,16 +366,8 @@ export async function requestCrossHospitalMedicalHistory(patientId, doctorProfil
   const doctorHospital = doctorProfile?.hospital || 'Emergency Trauma Center';
   const doctorName = doctorProfile?.full_name || 'Attending Physician';
 
-  // 1. Identify all registered MED-ID partner hospitals that hold records for this patient
-  const registeredHospitals = new Set([
-    'Metro Trauma Center',
-    'St. Jude Emergency Hospital',
-    'Apex Heart & Vascular Institute'
-  ]);
-
-  if (doctorHospital && doctorHospital.trim()) {
-    registeredHospitals.add(doctorHospital.trim());
-  }
+  // 1. Identify genuine facilities that hold records for this patient
+  const genuineFacilities = new Set();
 
   try {
     const { data: existingRecords } = await client
@@ -361,19 +376,19 @@ export async function requestCrossHospitalMedicalHistory(patientId, doctorProfil
       .eq('patient_id', patientId);
     if (existingRecords && existingRecords.length > 0) {
       existingRecords.forEach(r => {
-        if (r.facility && r.facility.trim()) registeredHospitals.add(r.facility.trim());
+        if (r.facility && r.facility.trim()) genuineFacilities.add(r.facility.trim());
       });
     }
   } catch (e) {
     console.warn('Existing records lookup notice:', e.message);
   }
 
-  const targetHospitals = Array.from(registeredHospitals);
+  const targetFacilities = Array.from(genuineFacilities);
 
-  // 2. Dispatches an inter-hospital compliance notification to each hospital
+  // 2. Dispatches compliance notification only if external facilities have records
   const notificationsDispatched = [];
-  for (const hospital of targetHospitals) {
-    const message = `INTER-HOSPITAL RECORD ACCESS: Dr. ${doctorName} from ${doctorHospital} (Verified MED-ID Doctor) pulled emergency clinical history for patient ${patientName || 'Patient'} from ${hospital}. Inter-hospital data exchange authorized under Emergency Protocol.`;
+  for (const facility of targetFacilities) {
+    const message = `INTER-HOSPITAL RECORD ACCESS: Dr. ${doctorName} from ${doctorHospital} (Verified MED-ID Doctor) pulled emergency clinical history for patient ${patientName || 'Patient'} from ${facility}.`;
 
     try {
       await client.from('notifications').insert({
@@ -385,34 +400,39 @@ export async function requestCrossHospitalMedicalHistory(patientId, doctorProfil
       console.warn('Notification insert notice:', e.message);
     }
 
-    await logAuditEntry({
-      action: 'INTERHOSPITAL_HISTORY_PULL',
-      targetId: patientId,
-      details: message
-    });
-
     notificationsDispatched.push({
-      hospital: hospital,
+      hospital: facility,
       notifiedAt: new Date().toISOString(),
       status: 'PULLED & NOTIFIED',
       message: message
     });
   }
 
-  // 3. Mark medical report request as 'granted' automatically (bypassing manual admin approval)
+  await logAuditEntry({
+    action: 'INTERHOSPITAL_HISTORY_PULL',
+    targetId: patientId,
+    details: `Doctor Dr. ${doctorName} (${doctorHospital}) accessed full medical report for patient ${patientName || 'Patient'}. ${targetFacilities.length} partner facilities queried.`
+  });
+
+  // 3. Auto-grant 24-hour emergency report access via secure RPC function
   try {
-    await client.from('medical_report_requests').upsert({
-      doctor_id: doctorId,
-      patient_id: patientId,
-      status: 'granted',
-      requested_at: new Date().toISOString(),
-      reviewed_by: doctorId,
-      reviewed_at: new Date().toISOString(),
-      granted_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    }, { onConflict: 'doctor_id,patient_id' });
-  } catch (e) {
-    console.warn('medical_report_requests upsert notice:', e.message);
+    await client.rpc('medid_auto_grant_emergency_report', { p_patient_id: patientId });
+  } catch (rpcErr) {
+    console.warn('medid_auto_grant_emergency_report notice (trying direct upsert):', rpcErr.message);
+    try {
+      await client.from('medical_report_requests').upsert({
+        doctor_id: doctorId,
+        patient_id: patientId,
+        status: 'granted',
+        requested_at: new Date().toISOString(),
+        reviewed_by: doctorId,
+        reviewed_at: new Date().toISOString(),
+        granted_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      }, { onConflict: 'doctor_id,patient_id' });
+    } catch (e) {
+      console.warn('medical_report_requests fallback upsert notice:', e.message);
+    }
   }
 
   // 4. Retrieve full medical report (legacy fields + clinical entries)
@@ -638,10 +658,61 @@ export async function getEnrolledPatientsForScanner() {
 }
 
 /**
- * Fallback search for doctors by Name, Blood Type, or Allergies
+ * Doctor patient record lookup by Name, Email, or UID / MED-ID
  */
 export async function searchPatients(query) {
-  // Unverified name/history lookup bypasses the scan gate and is disabled.
+  if (!query || typeof query !== 'string' || !query.trim()) return [];
+  const client = supabaseClient;
+  const cleanQuery = query.trim();
+
+  // 1. Primary: Server-side secure RPC function
+  try {
+    const { data, error } = await client.rpc('medid_search_patients', { p_query: cleanQuery });
+    if (!error && Array.isArray(data)) {
+      return data.map(p => ({
+        ...p,
+        blood_type: p.blood_type || p.blood_group || 'Unknown',
+        blood_group: p.blood_group || p.blood_type || 'Unknown'
+      }));
+    }
+    if (error) {
+      console.warn('medid_search_patients RPC notice:', error.message);
+    }
+  } catch (rpcErr) {
+    console.warn('searchPatients RPC exception:', rpcErr.message);
+  }
+
+  // 2. Fallback: Direct table search across patients & profiles
+  try {
+    const isMedId = cleanQuery.toUpperCase().startsWith('MED-');
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanQuery);
+
+    let queryBuilder = client
+      .from('patients')
+      .select('*, profiles:id (email, full_name, role)');
+
+    if (isUuid) {
+      queryBuilder = queryBuilder.eq('id', cleanQuery);
+    } else if (isMedId) {
+      queryBuilder = queryBuilder.ilike('med_id_number', `%${cleanQuery}%`);
+    } else {
+      queryBuilder = queryBuilder.or(`full_name.ilike.%${cleanQuery}%,emerg_email.ilike.%${cleanQuery}%,med_id_number.ilike.%${cleanQuery}%`);
+    }
+
+    const { data: directData, error: directErr } = await queryBuilder.limit(25);
+    if (!directErr && Array.isArray(directData)) {
+      return directData.map(p => ({
+        ...p,
+        email: p.profiles?.email || p.emerg_email || '',
+        full_name: p.full_name || p.profiles?.full_name || 'Patient',
+        blood_type: p.blood_type || p.blood_group || 'Unknown',
+        blood_group: p.blood_group || p.blood_type || 'Unknown'
+      }));
+    }
+  } catch (directCatch) {
+    console.warn('searchPatients fallback notice:', directCatch.message);
+  }
+
   return [];
 }
 

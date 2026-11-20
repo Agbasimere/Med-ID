@@ -395,7 +395,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
             </div>
 
             {/* Viewport Area */}
-            <div className="relative w-full rounded-3xl bg-slate-950 min-h-[440px] sm:min-h-[480px] overflow-hidden border border-slate-800 flex flex-col justify-between p-4 select-none">
+            <div className="relative w-full rounded-3xl bg-slate-950 min-h-[460px] sm:min-h-[520px] md:min-h-[560px] overflow-hidden border border-slate-800 flex flex-col justify-between p-4 select-none">
               
               {/* Video or Captured Image */}
               {capturedPhoto ? (
@@ -435,13 +435,13 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
                 <div className="relative z-10 my-2 flex flex-col items-center justify-center pointer-events-none">
                   <div className="relative">
                     {/* Reticle corner marks */}
-                    <div className="absolute -top-3 -left-3 w-5 h-5 border-t-2 border-l-2 border-lime-400/80 rounded-tl-lg" />
-                    <div className="absolute -top-3 -right-3 w-5 h-5 border-t-2 border-r-2 border-lime-400/80 rounded-tr-lg" />
-                    <div className="absolute -bottom-3 -left-3 w-5 h-5 border-b-2 border-l-2 border-lime-400/80 rounded-bl-lg" />
-                    <div className="absolute -bottom-3 -right-3 w-5 h-5 border-b-2 border-r-2 border-lime-400/80 rounded-br-lg" />
+                    <div className="absolute -top-3.5 -left-3.5 w-6 h-6 border-t-2 border-l-2 border-lime-400/80 rounded-tl-lg" />
+                    <div className="absolute -top-3.5 -right-3.5 w-6 h-6 border-t-2 border-r-2 border-lime-400/80 rounded-tr-lg" />
+                    <div className="absolute -bottom-3.5 -left-3.5 w-6 h-6 border-b-2 border-l-2 border-lime-400/80 rounded-bl-lg" />
+                    <div className="absolute -bottom-3.5 -right-3.5 w-6 h-6 border-b-2 border-r-2 border-lime-400/80 rounded-br-lg" />
 
                     {/* Oval Aperture Mask */}
-                    <div className={`w-56 h-72 sm:w-64 sm:h-84 rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture ${
+                    <div className={`w-64 h-80 sm:w-72 sm:h-92 md:w-80 md:h-[400px] rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture ${
                       faceAligned ? 'border-lime-400 ring-4 ring-lime-400/25 active' : 'border-lime-400/60'
                     }`}>
                       {capturing && (

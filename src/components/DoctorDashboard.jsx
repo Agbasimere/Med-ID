@@ -101,6 +101,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   const isPending = userProfile?.status === 'pending';
 
@@ -563,13 +564,20 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
   // 6. Manual Fallback Search
   const handleSearch = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!searchQuery.trim()) return;
 
     setSearching(true);
-    const results = await searchPatients(searchQuery);
-    setSearchResults(results);
-    setSearching(false);
+    setHasSearched(true);
+    try {
+      const results = await searchPatients(searchQuery.trim());
+      setSearchResults(results);
+    } catch (err) {
+      console.warn('searchPatients error:', err);
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const handleSelectPatientManually = async (patient) => {
@@ -961,7 +969,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
               )}
 
               {/* Viewport Area: Video element is ALWAYS mounted in the DOM so videoRef.current is ALWAYS valid */}
-              <div className="relative w-full bg-slate-950 min-h-[480px] sm:min-h-[540px] flex flex-col justify-between p-4 sm:p-6 overflow-hidden select-none">
+              <div className="relative w-full bg-slate-950 min-h-[500px] sm:min-h-[560px] md:min-h-[620px] lg:min-h-[680px] flex flex-col justify-between p-4 sm:p-6 overflow-hidden select-none">
                 
                 {/* Underneath: The Live Full-Resolution Camera Feed */}
                 <video
@@ -995,18 +1003,18 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                 </div>
 
                 {/* Center: The Biometric Oval Aperture (Casts 9999px Dark Backdrop Mask Outside) */}
-                <div className="relative z-10 my-4 flex flex-col items-center justify-center">
+                <div className="relative z-10 my-4 sm:my-6 flex flex-col items-center justify-center">
                   
                   {/* The Oval Frame with Glowing Aperture */}
                   <div className="relative">
-                    {/* Corner target reticles framing the oval */}
-                    <div className="absolute -top-3 -left-3 w-6 h-6 border-t-2 border-l-2 border-lime-400/80 rounded-tl-lg" />
-                    <div className="absolute -top-3 -right-3 w-6 h-6 border-t-2 border-r-2 border-lime-400/80 rounded-tr-lg" />
-                    <div className="absolute -bottom-3 -left-3 w-6 h-6 border-b-2 border-l-2 border-lime-400/80 rounded-bl-lg" />
-                    <div className="absolute -bottom-3 -right-3 w-6 h-6 border-b-2 border-r-2 border-lime-400/80 rounded-br-lg" />
+                    {/* Corner target reticles framing the oval - responsive scaling */}
+                    <div className="absolute -top-3.5 -left-3.5 w-6 h-6 md:w-8 md:h-8 md:-top-4 md:-left-4 border-t-2 md:border-t-3 border-l-2 md:border-l-3 border-lime-400/80 rounded-tl-lg md:rounded-tl-xl" />
+                    <div className="absolute -top-3.5 -right-3.5 w-6 h-6 md:w-8 md:h-8 md:-top-4 md:-right-4 border-t-2 md:border-t-3 border-r-2 md:border-r-3 border-lime-400/80 rounded-tr-lg md:rounded-tr-xl" />
+                    <div className="absolute -bottom-3.5 -left-3.5 w-6 h-6 md:w-8 md:h-8 md:-bottom-4 md:-left-4 border-b-2 md:border-b-3 border-l-2 md:border-l-3 border-lime-400/80 rounded-bl-lg md:rounded-bl-xl" />
+                    <div className="absolute -bottom-3.5 -right-3.5 w-6 h-6 md:w-8 md:h-8 md:-bottom-4 md:-right-4 border-b-2 md:border-b-3 border-r-2 md:border-r-3 border-lime-400/80 rounded-br-lg md:rounded-br-xl" />
 
-                    {/* Oval Cutout Mask */}
-                    <div className={`w-60 h-80 sm:w-68 sm:h-92 rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture flex items-center justify-center ${
+                    {/* Oval Cutout Mask - Large on desktop webview, compact on mobile */}
+                    <div className={`w-64 h-80 sm:w-72 sm:h-92 md:w-80 md:h-[420px] lg:w-[380px] lg:h-[490px] xl:w-[420px] xl:h-[530px] rounded-[50%] overflow-hidden relative border-2 transition-all duration-300 biometric-oval-aperture flex items-center justify-center ${
                       faceAligned && streamActive ? 'border-lime-400 ring-4 ring-lime-400/25 active' : 'border-lime-400/60'
                     }`}>
                       
@@ -1141,57 +1149,85 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
             <div className="flex items-center gap-2 mb-3">
               <Search className="w-4 h-4 text-slate-700" />
               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                Trauma Fallback Search
+                Patient Record Lookup
               </h3>
             </div>
             <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-              If the patient's face is obscured or the device authenticator is unavailable, search by name or emergency contact.
+              Search for registered patients by their full name, email address, or patient UID / MED-ID number.
             </p>
 
             <form onSubmit={handleSearch} className="space-y-3">
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Patient Name or Phone..."
+                  placeholder="Search by Patient Name, Email, or UID / MED-ID..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="corporate-input text-xs"
                 />
                 <button
                   type="submit"
-                  disabled={searching}
-                  className="corporate-btn-primary !py-2 !px-3.5 !text-xs flex-shrink-0"
+                  disabled={searching || !searchQuery.trim()}
+                  className="corporate-btn-primary !py-2 !px-4 !text-xs flex-shrink-0 disabled:opacity-50"
                 >
-                  {searching ? 'Searching...' : 'Lookup'}
+                  {searching ? 'Searching...' : 'Lookup Patient'}
                 </button>
               </div>
             </form>
 
+            {/* Matches Found */}
             {searchResults.length > 0 && (
-              <div className="mt-4 space-y-2 border-t border-slate-100 pt-3">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  Matches Found ({searchResults.length})
-                </span>
+              <div className="mt-5 space-y-2.5 border-t border-slate-100 pt-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Matches Found ({searchResults.length})
+                  </span>
+                  <span className="text-[11px] text-slate-400">Click to open triage dossier</span>
+                </div>
                 {searchResults.map((p) => (
                   <div
                     key={p.id}
                     onClick={() => handleSelectPatientManually(p)}
-                    className="p-3 rounded-xl bg-slate-50 hover:bg-brand-50 border border-slate-200 hover:border-brand-300 transition-all cursor-pointer flex items-center justify-between"
+                    className="p-3.5 rounded-2xl bg-slate-50 hover:bg-brand-50/70 border border-slate-200 hover:border-brand-300 transition-all cursor-pointer flex items-center justify-between group shadow-sm hover:shadow"
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-900">{p.full_name}</span>
-                        <span className="corporate-badge-red text-[10px] font-bold">
-                          {p.blood_type || 'Blood N/A'}
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900 group-hover:text-brand-700 transition-colors">
+                          {p.full_name}
                         </span>
+                        <span className="corporate-badge-red text-[10px] font-bold">
+                          {p.blood_type || p.blood_group || 'Blood N/A'}
+                        </span>
+                        {p.med_id_number && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 font-semibold">
+                            {p.med_id_number}
+                          </span>
+                        )}
                       </div>
-                      <span className="text-[11px] text-slate-500">
-                        DOB: {p.dob || 'Unknown'} • Allergies: {p.allergies || 'None'}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        {p.email && <span className="font-medium text-slate-600">{p.email}</span>}
+                        {p.email && <span>•</span>}
+                        <span>DOB: <strong>{p.dob || 'Unknown'}</strong></span>
+                        <span>•</span>
+                        <span>Sex: {p.sex || 'Not recorded'}</span>
+                        <span>•</span>
+                        <span>Allergies: {p.allergies || 'None recorded'}</span>
+                      </div>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                    <div className="flex items-center gap-1.5 text-brand-600 font-bold text-xs pl-3 flex-shrink-0">
+                      <span className="hidden sm:inline">Open Dossier</span>
+                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
+                    </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Zero Matches Notice */}
+            {hasSearched && !searching && searchResults.length === 0 && (
+              <div className="mt-4 p-4 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs text-center space-y-1 animate-fadeIn">
+                <p className="font-bold">No patient found matching "{searchQuery}"</p>
+                <p className="text-[11px] text-amber-700">Please verify the name, email address, or patient UID / MED-ID and try again.</p>
               </div>
             )}
           </div>

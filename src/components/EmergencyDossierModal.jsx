@@ -44,12 +44,10 @@ export default function EmergencyDossierModal({
   const [fullHistoryUnlocked, setFullHistoryUnlocked] = useState(false);
   const [pullingHistory, setPullingHistory] = useState(false);
   const [pullProgressStep, setPullProgressStep] = useState(0);
-  const [hospitalPullLogs, setHospitalPullLogs] = useState([]);
 
   useEffect(() => {
     let active = true;
     setFullHistoryUnlocked(false);
-    setHospitalPullLogs([]);
     setPullProgressStep(0);
 
     if (isOpen && patient?.id && doctorProfile?.role === 'doctor') {
@@ -164,7 +162,7 @@ export default function EmergencyDossierModal({
       setPullProgressStep(2);
 
       // Step 2: Query and notify hospitals
-      const result = await requestCrossHospitalMedicalHistory(
+      await requestCrossHospitalMedicalHistory(
         patient.id, 
         doctorProfile, 
         patient.full_name
@@ -173,12 +171,11 @@ export default function EmergencyDossierModal({
       await new Promise(r => setTimeout(r, 700));
       setPullProgressStep(3);
 
-      setHospitalPullLogs(result.hospitals || []);
       setFullHistoryUnlocked(true);
       confetti({ particleCount: 50, spread: 70 });
       setFeedbackMsg({
         isError: false,
-        text: `Full medical history aggregated across ${result.hospitals?.length || 3} registered hospitals. Access notices dispatched to facility records departments.`
+        text: 'Full medical history unlocked for clinical review. All formal records with facilities are displayed in the record table.'
       });
     } catch (err) {
       console.error('Inter-hospital pull error:', err);
@@ -427,27 +424,6 @@ export default function EmergencyDossierModal({
                 </button>
               </div>
 
-              {/* Connected Hospitals Preview */}
-              <div className="pt-3 border-t border-brand-100">
-                <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2">
-                  Registered Partner Hospitals in Network:
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                  <div className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-800">Metro Trauma Center</span>
-                    <span className="corporate-badge-blue text-[9px]">Level 1 Trauma</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-800">St. Jude Emergency Hospital</span>
-                    <span className="corporate-badge-green text-[9px]">Surgical & Cardio</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-800">Apex Specialist Care</span>
-                    <span className="corporate-badge-amber text-[9px]">Outpatient & Rx</span>
-                  </div>
-                </div>
-              </div>
-
               {/* Retrieval Handshake Animation Status */}
               {pullingHistory && (
                 <div className="p-4 rounded-xl bg-slate-900 text-white text-xs font-mono space-y-2 animate-fadeIn">
@@ -469,27 +445,9 @@ export default function EmergencyDossierModal({
             </div>
           )}
 
-          {/* If Unlocked: Display Hospital Notifications Summary & Full Medical History Table */}
+          {/* If Unlocked: Display Full Medical History Table directly */}
           {fullHistoryUnlocked && (
-            <div className="space-y-5 animate-fadeIn">
-              
-              {hospitalPullLogs.length > 0 && (
-                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 text-emerald-900 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Automatic Inter-Hospital Exchange Audit:</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-emerald-800 font-mono">
-                    {hospitalPullLogs.map((h, i) => (
-                      <div key={i} className="p-2 rounded-lg bg-white/80 border border-emerald-200">
-                        <strong className="block text-emerald-950 font-sans">{h.hospital}</strong>
-                        <span>Status: {h.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+            <div className="space-y-4 animate-fadeIn">
               {/* Full Medical History Table (Conditions, Medications, Surgeries, Clinical Encounters) */}
               <MedicalHistoryTable 
                 patient={patient} 
