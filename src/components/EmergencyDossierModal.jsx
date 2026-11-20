@@ -15,7 +15,8 @@ import {
   AlertCircle,
   Lock,
   Unlock,
-  Check
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -80,9 +81,30 @@ export default function EmergencyDossierModal({
     return Math.abs(ageDate.getUTCFullYear() - 1970);
   };
 
+  const getDirectWhatsAppUrl = () => {
+    if (!patient?.emerg_phone) return '';
+    let phone = String(patient.emerg_phone || '').replace(/[^\d]/g, '');
+    if (phone.length === 11 && phone.startsWith('0')) {
+      phone = '234' + phone.slice(1);
+    } else if (phone.startsWith('00')) {
+      phone = phone.slice(2);
+    }
+    const doctorName = doctorProfile?.full_name ? `Dr. ${doctorProfile.full_name}` : 'Attending Physician';
+    const hospital = doctorProfile?.hospital || 'Emergency Trauma Center';
+    const patientName = patient.full_name || 'Emergency Patient';
+    const text = `🚨 *MED-ID EMERGENCY MEDICAL ALERT*\n\n` +
+      `Dear ${patient.emerg_name || 'Next of Kin'},\n\n` +
+      `Your family member *${patientName}* is currently receiving emergency medical care at *${hospital}*.\n\n` +
+      `• *Attending Physician:* ${doctorName} (License: ${doctorProfile?.license_no || 'MD-ON-DUTY'})\n` +
+      `• *Blood Type:* ${patient.blood_type || patient.blood_group || 'Recorded'}\n` +
+      `• *Identification:* Med-ID Biometric Verified\n\n` +
+      `Please contact the emergency department desk immediately or proceed to ${hospital}.`;
+    return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  };
+
   const handleDispatchNotification = async () => {
     setDispatching(true);
-    setFeedbackMsg('');
+    setFeedbackMsg(null);
 
     const message = `EMERGENCY ALERT: Your family member ${patient.full_name || 'Patient'} is receiving emergency medical care at ${doctorProfile?.hospital || 'Emergency Trauma Center'}. Attending Physician: ${doctorProfile?.full_name || 'ER Attending Doctor'} (License: ${doctorProfile?.license_no || 'MD-ON-DUTY'}). Med-ID Biometric identification verified.`;
 
@@ -94,10 +116,16 @@ export default function EmergencyDossierModal({
       });
 
       setAlertSent(true);
-      setFeedbackMsg(`Emergency alert recorded in MED-ID for ${patient.emerg_name || 'the next of kin'}.`);
+      setFeedbackMsg({
+        isError: false,
+        text: `Emergency alert recorded in MED-ID for ${patient.emerg_name || 'the next of kin'}.`
+      });
     } catch (err) {
       console.error('Dispatch error:', err);
-      setFeedbackMsg('Failed to dispatch alert: ' + (err.message || 'Permission denied'));
+      setFeedbackMsg({
+        isError: true,
+        text: 'Failed to dispatch alert: ' + (err.message || 'Permission denied')
+      });
     } finally {
       setDispatching(false);
     }
@@ -105,13 +133,20 @@ export default function EmergencyDossierModal({
 
   const handleWhatsApp = async () => {
     setWhatsappBusy(true); 
-    setFeedbackMsg('');
+    setFeedbackMsg(null);
     try {
       const result = await sendWhatsAppEmergencyAlert(patient.id);
       setWhatsappSent(result.sent > 0);
-      setFeedbackMsg(`WhatsApp alert sent to ${result.sent} of ${result.total} next-of-kin contact(s).`);
+      setFeedbackMsg({
+        isError: false,
+        text: `WhatsApp alert sent to ${result.sent} of ${result.total} next-of-kin contact(s).`
+      });
+      confetti({ particleCount: 30, spread: 60 });
     } catch (error) { 
-      setFeedbackMsg(error.message || 'WhatsApp alert could not be sent.'); 
+      setFeedbackMsg({
+        isError: true,
+        text: error.message || 'WhatsApp alert could not be sent.'
+      });
     } finally { 
       setWhatsappBusy(false); 
     }
@@ -141,10 +176,16 @@ export default function EmergencyDossierModal({
       setHospitalPullLogs(result.hospitals || []);
       setFullHistoryUnlocked(true);
       confetti({ particleCount: 50, spread: 70 });
-      setFeedbackMsg(`Full medical history aggregated across ${result.hospitals?.length || 3} registered hospitals. Access notices dispatched to facility records departments.`);
+      setFeedbackMsg({
+        isError: false,
+        text: `Full medical history aggregated across ${result.hospitals?.length || 3} registered hospitals. Access notices dispatched to facility records departments.`
+      });
     } catch (err) {
       console.error('Inter-hospital pull error:', err);
-      setFeedbackMsg('Failed to pull cross-hospital records: ' + (err.message || 'Network error'));
+      setFeedbackMsg({
+        isError: true,
+        text: 'Failed to pull cross-hospital records: ' + (err.message || 'Network error')
+      });
     } finally {
       setPullingHistory(false);
     }
@@ -223,9 +264,35 @@ export default function EmergencyDossierModal({
 
         {/* Feedback Alert */}
         {feedbackMsg && (
-          <div className="my-4 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-fadeIn">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span className="font-semibold">{feedbackMsg}</span>
+          <div className={`my-4 p-4 rounded-xl text-xs flex items-start gap-3 animate-fadeIn ${
+            feedbackMsg.isError 
+              ? 'bg-rose-50 border-2 border-rose-200 text-rose-900 shadow-sm' 
+              : 'bg-emerald-50 border-2 border-emerald-200 text-emerald-900 shadow-sm'
+          }`}>
+            {feedbackMsg.isError ? (
+              <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="space-y-1.5 flex-1">
+              <span className="font-bold text-sm block">
+                {feedbackMsg.isError ? 'Dispatch Notice' : 'Alert Delivered'}
+              </span>
+              <p className="leading-relaxed">{feedbackMsg.text || feedbackMsg}</p>
+              {feedbackMsg.isError && patient?.emerg_phone && (
+                <div className="pt-1.5 border-t border-rose-200/80">
+                  <a
+                    href={getDirectWhatsAppUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 font-bold text-emerald-700 bg-white border border-emerald-300 hover:bg-emerald-50 px-3 py-1.5 rounded-lg shadow-sm transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Click here to open WhatsApp directly & send now</span>
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -273,15 +340,27 @@ export default function EmergencyDossierModal({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {patient.emerg_phone ? (
-                <button 
-                  type="button" 
-                  onClick={handleWhatsApp} 
-                  disabled={whatsappBusy || whatsappSent} 
-                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  <span>{whatsappBusy ? 'Sending…' : whatsappSent ? 'WhatsApp Alert Sent' : 'Send WhatsApp Alert'}</span>
-                </button>
+                <>
+                  <button 
+                    type="button" 
+                    onClick={handleWhatsApp} 
+                    disabled={whatsappBusy || whatsappSent} 
+                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50 shadow-sm"
+                  >
+                    <MessageCircle className="h-4 w-4 text-emerald-600" />
+                    <span>{whatsappBusy ? 'Sending Cloud Alert…' : whatsappSent ? 'Cloud Alert Sent' : 'Send WhatsApp Alert'}</span>
+                  </button>
+
+                  <a 
+                    href={getDirectWhatsAppUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-emerald-700 shadow-sm shadow-emerald-600/30 active:scale-95"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>Open in WhatsApp</span>
+                  </a>
+                </>
               ) : (
                 <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">
                   No emergency phone registered
