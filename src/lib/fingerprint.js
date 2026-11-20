@@ -27,13 +27,25 @@ async function requestCredential(operation, timeoutMs = 60000) {
     return await operation(controller.signal);
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error('Windows Hello timed out. Close the Windows prompt and retry; PIN, face, or fingerprint may be requested by Windows.');
+      throw new Error('Device verification timed out. Retry and complete the fingerprint, face, or screen-lock prompt on your device.');
     }
     if (error?.name === 'InvalidStateError') {
-      throw new Error('This authenticator already has a MED-ID credential for this account. Use the existing credential or remove its old MED-ID passkey in Windows/browser passkey settings before registering again.');
+      throw new Error('This device already has a MED-ID passkey for this account. Use the existing credential or remove its saved MED-ID passkey in your device or password-manager settings before registering again.');
     }
     if (error?.name === 'NotAllowedError') {
-      throw new Error('Windows Hello was cancelled or timed out. Retry and complete the Windows verification prompt.');
+      const friendly = new Error('Device verification was cancelled or timed out. On Android, make sure a screen lock and fingerprint are set up, then retry in Chrome.');
+      friendly.name = error.name;
+      throw friendly;
+    }
+    if (error?.name === 'NotSupportedError') {
+      const friendly = new Error('This browser did not find a supported passkey authenticator. On Android, use an up-to-date Chrome browser with a screen lock and fingerprint configured.');
+      friendly.name = error.name;
+      throw friendly;
+    }
+    if (error?.name === 'SecurityError') {
+      const friendly = new Error('This site is not authorized for passkeys. Open the production HTTPS site and check the MED-ID relying-party domain configuration.');
+      friendly.name = error.name;
+      throw friendly;
     }
     throw error;
   } finally {
@@ -73,7 +85,7 @@ export function base64ToBuffer(base64) {
 }
 
 /**
- * Checks if the user's operating system / browser supports WebAuthn platform biometrics (Windows Hello, Touch ID).
+ * Checks whether this browser reports a built-in user-verifying authenticator.
  */
 export async function isHardwareBiometricAvailable() {
   if (typeof window === 'undefined' || !window.PublicKeyCredential) {
@@ -90,22 +102,41 @@ export async function isHardwareBiometricAvailable() {
   }
 }
 
+export function isWebAuthnSupported() {
+  return typeof window !== 'undefined' && Boolean(window.isSecureContext && window.PublicKeyCredential && navigator.credentials?.create && navigator.credentials?.get);
+}
+
 /**
- * Registers a platform authenticator with a server-issued and server-verified challenge.
+ * Registers a device passkey with a server-issued and server-verified challenge.
  */
 export async function enrollHardwareFingerprint(patientId, fullName = 'Patient', email = 'patient@medid.org', fingerName = 'Device authenticator') {
   if (typeof window === 'undefined' || !window.PublicKeyCredential) {
     throw new Error('Hardware biometric authentication (WebAuthn) is not supported in this browser.');
   }
 
-  const options = await invokeWebAuthn({ action: 'registration-options', patientId, fullName, email });
-  const publicKey = {
-    ...options,
-    challenge: base64ToBuffer(options.challenge),
-    user: { ...options.user, id: base64ToBuffer(options.user.id) },
-    excludeCredentials: (options.excludeCredentials || []).map(c => ({ ...c, id: base64ToBuffer(c.id) }))
-  };
-  const credential = await requestCredential(signal => navigator.credentials.create({ publicKey, signal }));
+  // Prefer the built-in platform authenticator. If mobile/browser capability detection
+  // reports a false negative, let the browser choose an available passkey authenticator.
+  const platformAvailable = await isHardwareBiometricAvailable();
+  let options = await invokeWebAuthn({
+    action: 'registration-options', patientId, fullName, email,
+    authenticator: platformAvailable ? 'platform' : 'any'
+  });
+  const toPublicKey = (value) => ({
+    ...value,
+    challenge: base64ToBuffer(value.challenge),
+    user: { ...value.user, id: base64ToBuffer(value.user.id) },
+    excludeCredentials: (value.excludeCredentials || []).map(c => ({ ...c, id: base64ToBuffer(c.id) }))
+  });
+  let credential;
+  try {
+    const publicKey = toPublicKey(options);
+    credential = await requestCredential(signal => navigator.credentials.create({ publicKey, signal }));
+  } catch (error) {
+    if (!platformAvailable || error?.name !== 'NotSupportedError') throw error;
+    options = await invokeWebAuthn({ action: 'registration-options', authenticator: 'any' });
+    const publicKey = toPublicKey(options);
+    credential = await requestCredential(signal => navigator.credentials.create({ publicKey, signal }));
+  }
   if (!credential) {
     throw new Error('Biometric enrollment cancelled or not recognized.');
   }

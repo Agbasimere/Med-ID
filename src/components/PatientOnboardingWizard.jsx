@@ -19,15 +19,16 @@ import {
 import { 
   enrollHardwareFingerprint
 } from '../lib/fingerprint';
-import { updatePatientProfile } from '../lib/supabase';
+import { saveInitialPatientIntake, updatePatientProfile } from '../lib/supabase';
 import { startCameraStream, stopCameraStream } from '../lib/camera';
 
-export default function PatientOnboardingWizard({ currentUser, onComplete }) {
+export default function PatientOnboardingWizard({ currentUser, onComplete, initialPatientDetails = null, intakeAlreadySaved = false }) {
   const [step, setStep] = useState(1); // 1 = Face, 2 = Fingerprint, 3 = Profile details
   
   // Step 1: Face capture state
   const videoRef = useRef(null);
   const cameraRequestIdRef = useRef(0);
+  const [modelsReady, setModelsReady] = useState(false);
   const [streamActive, setStreamActive] = useState(false);
   const [facingMode, setFacingMode] = useState('user');
   const [capturing, setCapturing] = useState(false);
@@ -43,10 +44,21 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
   const [saving, setSaving] = useState(false);
 
   // Step 3: Basic profile fields patients are permitted to maintain.
-  const [dob, setDob] = useState('');
-  const [emergName, setEmergName] = useState('');
-  const [emergPhone, setEmergPhone] = useState('');
-  const [emergEmail, setEmergEmail] = useState('');
+  const [dob, setDob] = useState(initialPatientDetails?.dob || '');
+  const [sex, setSex] = useState(initialPatientDetails?.sex || '');
+  const [bloodType, setBloodType] = useState(initialPatientDetails?.bloodType || '');
+  const [genotype, setGenotype] = useState(initialPatientDetails?.genotype || '');
+  const [nationality, setNationality] = useState(initialPatientDetails?.nationality || '');
+  const [homeAddress, setHomeAddress] = useState(initialPatientDetails?.homeAddress || '');
+  const [allergies, setAllergies] = useState(initialPatientDetails?.allergies || '');
+  const [conditions, setConditions] = useState(initialPatientDetails?.conditions || '');
+  const [medications, setMedications] = useState(initialPatientDetails?.medications || '');
+  const [surgeries, setSurgeries] = useState(initialPatientDetails?.surgeries || '');
+  const [medicalHistory, setMedicalHistory] = useState(initialPatientDetails?.medicalHistory || '');
+  const [emergName, setEmergName] = useState(initialPatientDetails?.emergName || '');
+  const [emergPhone, setEmergPhone] = useState(initialPatientDetails?.emergPhone || '');
+  const [emergEmail, setEmergEmail] = useState(initialPatientDetails?.emergEmail || '');
+  const [whatsappOptIn, setWhatsappOptIn] = useState(Boolean(initialPatientDetails?.whatsappOptIn));
 
   useEffect(() => {
     if (step === 1) {
@@ -60,8 +72,13 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
   const initCamera = async () => {
     const requestId = ++cameraRequestIdRef.current;
     let stream = null;
+    setModelsReady(false);
     try {
-      await loadFaceApiModels();
+      loadFaceApiModels().then(() => {
+        if (requestId === cameraRequestIdRef.current) setModelsReady(true);
+      }).catch((modelError) => {
+        if (requestId === cameraRequestIdRef.current) setErrorMsg(modelError.message || 'Could not load face recognition models.');
+      });
       stream = await startCameraStream(facingMode);
       if (requestId !== cameraRequestIdRef.current || step !== 1) {
         stopCameraStream(stream);
@@ -118,7 +135,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
   };
 
   const handleCaptureFace = async () => {
-    if (!videoRef.current || !streamActive) return;
+    if (!videoRef.current || !streamActive || !modelsReady) return;
     setErrorMsg('');
     setCapturing(true);
 
@@ -128,7 +145,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
         throw new Error('No clear face detected in the frame. Please look directly at the camera with good lighting.');
       }
 
-      const photoBase64 = captureVideoFrame(videoRef.current, 0.85);
+      const photoBase64 = captureVideoFrame(videoRef.current, 0.72);
       if (!photoBase64) {
         throw new Error('Failed to capture frame snapshot.');
       }
@@ -144,7 +161,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
     }
   };
 
-  // Step 2: Hardware Fingerprint Enrollment via WebAuthn
+  // Step 2: Device biometric/passkey enrollment via WebAuthn
   const handleHardwareEnroll = async () => {
     if (fpTemplate || saving) return;
     setErrorMsg('');
@@ -194,11 +211,25 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
         photo: capturedPhoto
       };
 
+      if (!intakeAlreadySaved) {
+        await saveInitialPatientIntake(currentUser.id, {
+          dob, sex, bloodType, genotype, nationality, homeAddress,
+          allergies, conditions, medications, surgeries, medicalHistory,
+          emergName, emergPhone, emergEmail, whatsappOptIn
+        });
+      }
+
       await updatePatientProfile(currentUser.id, {
+        full_name: currentUser?.user_metadata?.full_name || '',
         dob,
+        sex,
+        genotype,
+        nationality,
+        home_address: homeAddress,
         emerg_name: emergName,
         emerg_phone: emergPhone,
         emerg_email: emergEmail,
+        emerg_whatsapp_opt_in: whatsappOptIn,
         descriptor: descriptorPayload
       });
 
@@ -302,7 +333,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                 <button
                   type="button"
                   onClick={handleCaptureFace}
-                  disabled={capturing || !streamActive}
+                  disabled={capturing || !streamActive || !modelsReady}
                   className="w-full corporate-btn-brand !py-3 !text-sm gap-2 shadow-md shadow-brand-500/20"
                 >
                   {capturing ? (
@@ -313,7 +344,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                   ) : (
                     <>
                       <Camera className="w-4 h-4" />
-                      <span>Capture & Verify Face Biometrics</span>
+                      <span>{modelsReady ? 'Capture & Verify Face Biometrics' : 'Preparing face verification…'}</span>
                     </>
                   )}
                 </button>
@@ -352,10 +383,10 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                 Step 2 of 3: Device Authenticator
               </span>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                Register device authenticator
+                Set up device biometrics
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                Register this device's <strong>platform authenticator</strong> (Windows Hello / Touch ID). It may verify by fingerprint, face, or device PIN; the browser does not reveal fingerprint data.
+                Register this device's passkey authenticator. Android can use its fingerprint or screen lock; other devices may use their own biometric or PIN. The browser never reveals fingerprint data.
               </p>
             </div>
 
@@ -370,7 +401,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                     Device Authenticator Registration
                   </h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    Continue to invoke Windows Hello / Touch ID. Your device may request a fingerprint, face, or PIN.
+                    Continue with your device's passkey prompt. On Android, Chrome can verify using fingerprint or screen lock.
                   </p>
                 </div>
 
@@ -425,7 +456,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                       onClick={() => setStep(3)}
                       className="flex-1 corporate-btn-brand !py-2.5 !text-xs gap-1.5"
                     >
-                      <span>Next: Medical History</span>
+                      <span>Next: Profile Details</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </>
@@ -461,7 +492,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                 Complete Your Profile
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                Add your date of birth and emergency contact. Verified clinicians manage medical history entries.
+                Review your date of birth and emergency contact. Your self-reported medical information is saved for clinician review.
               </p>
             </div>
 
@@ -495,6 +526,44 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
               />
             </div>
 
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-slate-700">Sex
+                <select value={sex} onChange={(e) => setSex(e.target.value)} className="corporate-input mt-1 !py-2">
+                  <option value="">Select if known</option><option value="Female">Female</option><option value="Male">Male</option><option value="Intersex">Intersex</option><option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-slate-700">Blood group
+                <select value={bloodType} onChange={(e) => setBloodType(e.target.value)} className="corporate-input mt-1 !py-2">
+                  <option value="">Select if known</option>{['A+','A−','B+','B−','AB+','AB−','O+','O−','Unknown'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-slate-700">Genotype (optional)
+                <input value={genotype} onChange={(e) => setGenotype(e.target.value)} maxLength={20} placeholder="e.g. AA, AS" className="corporate-input mt-1 !py-2" />
+              </label>
+              <label className="text-xs font-semibold text-slate-700">Nationality
+                <input value={nationality} onChange={(e) => setNationality(e.target.value)} maxLength={100} className="corporate-input mt-1 !py-2" />
+              </label>
+            </div>
+            <label className="block text-xs font-semibold text-slate-700">Home address
+              <textarea value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} rows={2} maxLength={500} placeholder="Street, city, state/region, country" className="corporate-input mt-1 !py-2" />
+            </label>
+
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5">
+              <div>
+                <h3 className="text-xs font-bold text-slate-800">Medical information</h3>
+                <p className="mt-1 text-[10px] text-slate-500">Optional. These are saved as self-reported details for clinician review and can’t be edited from the patient account later.</p>
+              </div>
+              {[
+                ['Existing conditions', conditions, setConditions, 'e.g. diabetes, asthma, epilepsy'],
+                ['Allergies and reactions', allergies, setAllergies, 'e.g. penicillin — rash; peanuts — swelling'],
+                ['Current medications', medications, setMedications, 'Medication, dose, and frequency if known'],
+                ['Previous surgeries and major treatments', surgeries, setSurgeries, 'Procedure, year, and hospital if known'],
+                ['Important medical history', medicalHistory, setMedicalHistory, 'Admissions, serious injuries, seizures, fainting, transfusions, or other relevant history']
+              ].map(([label, value, setter, placeholder]) => <label key={label} className="block text-[11px] font-semibold text-slate-600">{label}
+                <textarea value={value} onChange={(e) => setter(e.target.value)} rows={2} maxLength={2000} placeholder={placeholder} className="corporate-input mt-1 !px-3 !py-2" />
+              </label>)}
+            </div>
+
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
                 <PhoneCall className="w-4 h-4 text-emerald-600" />
@@ -510,7 +579,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                 />
                 <input
                   type="tel"
-                  placeholder="Phone Number (+1 555-0199)"
+                  placeholder="Phone Number(s), use commas for multiple"
                   value={emergPhone}
                   onChange={(e) => setEmergPhone(e.target.value)}
                   className="corporate-input !py-1.5 !text-xs"
@@ -523,6 +592,10 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
                 onChange={(e) => setEmergEmail(e.target.value)}
                 className="corporate-input !py-1.5 !text-xs"
               />
+              <label className="flex items-start gap-2 text-[11px] leading-relaxed text-slate-600">
+                <input type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} className="mt-0.5 accent-brand-700" />
+                <span>I confirm these emergency contacts have agreed to receive WhatsApp emergency alerts.</span>
+              </label>
             </div>
 
             <div className="flex gap-2 pt-2">

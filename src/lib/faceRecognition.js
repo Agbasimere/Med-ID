@@ -61,8 +61,9 @@ export async function extractFaceDescriptor(inputElement) {
 
   // Use TinyFaceDetector for low latency real-time webcam inference
   const options = new faceapi.TinyFaceDetectorOptions({
-    inputSize: 320,
-    scoreThreshold: 0.40
+    // 160 is a multiple of 32 and substantially reduces mobile inference time.
+    inputSize: 160,
+    scoreThreshold: 0.35
   });
 
   const detection = await faceapi
@@ -160,12 +161,13 @@ export function matchFaceAgainstPatients(liveDescriptor, enrolledPatients, thres
 /**
  * Captures image frame from video element as base64 JPEG
  */
-export function captureVideoFrame(videoElement, quality = 0.85) {
+export function captureVideoFrame(videoElement, quality = 0.75, maxDimension = 480) {
   if (!videoElement || videoElement.videoWidth === 0) return null;
 
   const canvas = document.createElement('canvas');
-  canvas.width = videoElement.videoWidth;
-  canvas.height = videoElement.videoHeight;
+  const scale = Math.min(1, maxDimension / Math.max(videoElement.videoWidth, videoElement.videoHeight));
+  canvas.width = Math.max(1, Math.round(videoElement.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(videoElement.videoHeight * scale));
   const ctx = canvas.getContext('2d');
   ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL('image/jpeg', quality);

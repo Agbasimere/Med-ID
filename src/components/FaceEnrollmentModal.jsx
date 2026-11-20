@@ -45,14 +45,12 @@ export default function FaceEnrollmentModal({
   }, [isOpen]);
 
   const initModelsAndCamera = async () => {
-    try {
-      await loadFaceApiModels();
-      setModelsReady(true);
-      startCamera();
-    } catch (err) {
+    setModelsReady(false);
+    loadFaceApiModels().then(() => setModelsReady(true)).catch((err) => {
       console.error('Failed to init models for enrollment:', err);
       setErrorMsg('Failed to initialize biometric models: ' + err.message);
-    }
+    });
+    startCamera();
   };
 
   const startCamera = async () => {
@@ -115,7 +113,7 @@ export default function FaceEnrollmentModal({
   };
 
   const handleCaptureAndEnroll = async () => {
-    if (!videoRef.current || !streamActive) return;
+    if (!videoRef.current || !streamActive || !modelsReady) return;
     setErrorMsg('');
     setCapturing(true);
 
@@ -127,7 +125,7 @@ export default function FaceEnrollmentModal({
       }
 
       // 2. Capture preview frame
-      const photoBase64 = captureVideoFrame(videoRef.current, 0.85);
+      const photoBase64 = captureVideoFrame(videoRef.current, 0.72);
       if (!photoBase64) {
         throw new Error('Failed to capture frame snapshot.');
       }
@@ -240,7 +238,7 @@ export default function FaceEnrollmentModal({
           <button
             type="button"
             onClick={handleCaptureAndEnroll}
-            disabled={capturing || !streamActive || success}
+            disabled={capturing || !streamActive || !modelsReady || success}
             className="w-full corporate-btn-brand !py-3 !text-sm gap-2 disabled:opacity-50 shadow-md shadow-brand-500/20"
           >
             {capturing ? (
@@ -256,7 +254,7 @@ export default function FaceEnrollmentModal({
             ) : (
               <>
                 <Camera className="w-4 h-4" />
-                <span>Capture & Save Emergency Biometrics</span>
+                <span>{modelsReady ? 'Capture & Save Emergency Biometrics' : 'Preparing face verification…'}</span>
               </>
             )}
           </button>

@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
           attestationType: 'none',
           excludeCredentials: (existing || []).map(row => ({ id: row.credential_id })),
           authenticatorSelection: {
-            authenticatorAttachment: 'platform',
+            ...(body.authenticator === 'any' ? {} : { authenticatorAttachment: 'platform' as const }),
             residentKey: 'preferred',
             userVerification: 'required',
           },
@@ -181,7 +181,15 @@ Deno.serve(async (req) => {
       if (patientProfileError || patientProfile.role !== 'patient' || patientProfile.status !== 'active') return json({ error: 'Patient account is not active' }, 403);
       const { data: patient, error: patientError } = await admin.from('patients').select('*').eq('id', credential.patient_id).single();
       if (patientError) throw patientError;
-      return json({ verified: true, patient: { ...patient, ...patientProfile } });
+      const { error: scanAuditError } = await admin.from('biometric_scan_audits').insert({ doctor_id: user.id, patient_id: credential.patient_id, modality: 'fingerprint' });
+      if (scanAuditError) throw scanAuditError;
+      return json({ verified: true, patient: {
+        id: patient.id, full_name: patientProfile.full_name, email: patientProfile.email,
+        dob: patient.dob, sex: patient.sex, blood_type: patient.blood_type, nationality: patient.nationality,
+        home_address: patient.home_address, emerg_name: patient.emerg_name,
+        emerg_phone: patient.emerg_phone, emerg_email: patient.emerg_email,
+        med_id_number: patient.med_id_number
+      } });
     }
 
     return json({ error: 'Unknown action' }, 400);

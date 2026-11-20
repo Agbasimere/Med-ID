@@ -11,7 +11,8 @@ import {
 import confetti from 'canvas-confetti';
 import { 
   enrollHardwareFingerprint,
-  isHardwareBiometricAvailable 
+  isHardwareBiometricAvailable,
+  isWebAuthnSupported
 } from '../lib/fingerprint';
 
 export default function FingerprintEnrollmentModal({ 
@@ -23,6 +24,7 @@ export default function FingerprintEnrollmentModal({
   onSuccess 
 }) {
   const [hasHardwareBiometrics, setHasHardwareBiometrics] = useState(true);
+  const [webAuthnSupported, setWebAuthnSupported] = useState(false);
   const [scannedTemplate, setScannedTemplate] = useState(null);
   const [saving, setSaving] = useState(false);
   const [isScanningHw, setIsScanningHw] = useState(false);
@@ -31,10 +33,11 @@ export default function FingerprintEnrollmentModal({
   
   // Check WebAuthn platform authenticator availability on mount
   useEffect(() => {
+    setWebAuthnSupported(isWebAuthnSupported());
     isHardwareBiometricAvailable().then(setHasHardwareBiometrics).catch(() => setHasHardwareBiometrics(false));
   }, []);
 
-  // 1. Hardware Fingerprint Enrollment via WebAuthn (Windows Hello / Touch ID)
+  // 1. Device biometric/passkey enrollment via WebAuthn.
   const handleHardwareEnroll = async () => {
     setErrorMsg('');
     setIsScanningHw(true);
@@ -106,10 +109,10 @@ export default function FingerprintEnrollmentModal({
             <Fingerprint className="w-6 h-6" />
           </div>
           <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-            Enroll Fingerprint Biometrics
+            Set Up Device Biometrics
           </h2>
           <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            Register this device's <strong>platform authenticator</strong> (Windows Hello / Touch ID). It may verify by fingerprint, face, or device PIN; the browser does not reveal fingerprint data.
+            Register this device's passkey authenticator. Android can use its fingerprint or screen lock; other devices may use their own biometric or PIN. The browser verifies the credential and never reveals fingerprint data.
           </p>
         </div>
 
@@ -131,14 +134,14 @@ export default function FingerprintEnrollmentModal({
                 Device Authenticator
               </h4>
               <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Continue with Windows Hello, Touch ID, or another passkey authenticator. Your device may request a fingerprint, face, or PIN.
+                Continue with your device's passkey authenticator. Android phones can verify with fingerprint or screen lock; the prompt depends on the device and browser.
               </p>
             </div>
 
             <button
               type="button"
               onClick={handleHardwareEnroll}
-              disabled={!hasHardwareBiometrics || isScanningHw || scannedTemplate}
+              disabled={!webAuthnSupported || isScanningHw || scannedTemplate}
               className="corporate-btn-emergency !py-3 !px-6 !text-xs gap-2 mx-auto shadow-md shadow-emergency-600/20 active:scale-95"
             >
               {isScanningHw ? (
@@ -156,7 +159,8 @@ export default function FingerprintEnrollmentModal({
 
             <p className="text-xs text-slate-500">{statusMessage}</p>
 
-            {!hasHardwareBiometrics && <p className="mx-auto max-w-sm text-xs text-amber-800">This browser or device has no available platform authenticator. Use a device with Windows Hello, Touch ID, or another passkey authenticator.</p>}
+            {!hasHardwareBiometrics && webAuthnSupported && <p className="mx-auto max-w-sm text-xs text-amber-800">The browser did not detect a built-in sensor. You can still try; it may offer a saved passkey or another authenticator. On Android, use current Chrome with a screen lock and fingerprint enrolled.</p>}
+            {!webAuthnSupported && <p className="mx-auto max-w-sm text-xs text-amber-800">Passkeys require a supported browser on this secure HTTPS site. Open MED-ID in Chrome on Android or Safari on iPhone.</p>}
 
             {scannedTemplate && (
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-center gap-2 animate-fadeIn font-semibold">

@@ -16,6 +16,8 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalConfig, setAuthModalConfig] = useState({ role: 'patient', mode: 'signin' });
   const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
+  const [onboardingPatientDetails, setOnboardingPatientDetails] = useState(null);
+  const [onboardingIntakeSaved, setOnboardingIntakeSaved] = useState(false);
 
   useEffect(() => {
     checkSession();
@@ -47,12 +49,13 @@ export default function App() {
     setShowAuthModal(true);
   };
 
-  const handleAuthSuccess = (user, profile, isNewPatientSignup = false) => {
+  const handleAuthSuccess = (user, profile, isNewPatientSignup = false, patientDetails = null, intakeSaved = false) => {
     setCurrentUser(user);
     setUserProfile(profile);
 
     if (isNewPatientSignup && profile?.role === 'patient') {
-      // Launch guided onboarding: Face verification -> Medical information
+      setOnboardingPatientDetails(patientDetails);
+      setOnboardingIntakeSaved(intakeSaved);
       setShowOnboardingWizard(true);
       setCurrentView('patient');
     } else {
@@ -135,8 +138,12 @@ export default function App() {
       {showOnboardingWizard && currentUser && (
         <PatientOnboardingWizard
           currentUser={currentUser}
+          initialPatientDetails={onboardingPatientDetails}
+          intakeAlreadySaved={onboardingIntakeSaved}
           onComplete={() => {
             setShowOnboardingWizard(false);
+            setOnboardingPatientDetails(null);
+            setOnboardingIntakeSaved(false);
             setCurrentView('patient');
           }}
         />

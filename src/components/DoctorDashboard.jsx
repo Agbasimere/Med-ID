@@ -24,18 +24,18 @@ import {
 import confetti from 'canvas-confetti';
 import { 
   loadFaceApiModels, 
-  extractFaceDescriptor, 
-  matchFaceAgainstPatients 
+  extractFaceDescriptor
 } from '../lib/faceRecognition';
 import { 
   verifyHardwareFingerprint, 
-  isHardwareBiometricAvailable 
+  isHardwareBiometricAvailable,
+  isWebAuthnSupported
 } from '../lib/fingerprint';
 import { 
-  getEnrolledPatientsForScanner, 
   logAuditEntry, 
   getDoctorAuditTrail, 
-  searchPatients 
+  searchPatients,
+  matchPatientFace
 } from '../lib/supabase';
 import EmergencyDossierModal from './EmergencyDossierModal';
 import WorkspaceSidebar from './WorkspaceSidebar';
@@ -62,13 +62,13 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
   // Scanner state (device authenticator)
   const [hasHardwareBiometrics, setHasHardwareBiometrics] = useState(true);
+  const [webAuthnSupported, setWebAuthnSupported] = useState(false);
   const [isScanningHw, setIsScanningHw] = useState(false);
   const [fpStatusMsg, setFpStatusMsg] = useState('BIOMETRIC SENSOR READY');
   const [fpErrorMsg, setFpErrorMsg] = useState('');
   const [fpSuccessMsg, setFpSuccessMsg] = useState('');
 
   // Database State (Kept strictly in memory for neural/fingerprint matching, NEVER displayed as a pre-loaded list)
-  const [enrolledPatients, setEnrolledPatients] = useState([]);
   const [sessionAudits, setSessionAudits] = useState([]);
   const [auditHistory, setAuditHistory] = useState([]);
   const [showHistoryArchive, setShowHistoryArchive] = useState(false);
@@ -91,6 +91,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
     async function init() {
       try {
+        setWebAuthnSupported(isWebAuthnSupported());
         setLoadingModels(true);
         isHardwareBiometricAvailable().then((avail) => {
           if (isMounted) {
@@ -104,7 +105,6 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
         if (isMounted) {
           setModelStatus('Biometric engine active. Enrolled database loaded.');
-          await refreshEnrolledPatients();
           setLoadingModels(false);
         }
       } catch (err) {
@@ -124,12 +124,6 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
       stopCamera();
     };
   }, []);
-
-  const refreshEnrolledPatients = async () => {
-    const list = await getEnrolledPatientsForScanner();
-    setEnrolledPatients(list);
-    return list;
-  };
 
   const loadPastAudits = async () => {
     setLoadingHistory(true);
@@ -225,17 +219,12 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
         return;
       }
 
-      const matchResult = matchFaceAgainstPatients(result.descriptor, enrolledPatients, 0.58);
-      if (matchResult && matchResult.match && matchResult.patient) {
+      const matchResult = await matchPatientFace(Array.from(result.descriptor));
+      if (matchResult?.match && matchResult.patient) {
         setScannerStatusText(`PATIENT IDENTIFIED: ${matchResult.patient.full_name} (${matchResult.confidence}%)`);
         confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
 
-        const auditData = {
-          action: 'ER_FACE_SCAN',
-          targetId: matchResult.patient.id,
-          details: `Identified patient ${matchResult.patient.full_name} (${matchResult.confidence}% match). Attending: Dr. ${userProfile?.full_name || 'Physician'}`
-        };
-        await logAuditEntry(auditData);
+        const auditData = { action: 'ER_FACE_SCAN', targetId: matchResult.patient.id, details: `Identified patient ${matchResult.patient.full_name} (${matchResult.confidence}% match). Attending: Dr. ${userProfile?.full_name || 'Physician'}` };
         recordSessionAudit({
           id: Date.now(),
           created_at: new Date().toISOString(),
@@ -245,7 +234,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
         });
 
         stopCamera();
-        setSelectedPatient(matchResult.patient);
+        setSelectedPatient({ ...matchResult.patient, _scan_verified: true });
         setShowDossier(true);
       } else {
         setScannerStatusText('NO ENROLLED RECORD MATCHED');
@@ -293,19 +282,14 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
           if (!isFaceScanActiveRef.current || !isContinuousFaceScan) return;
 
           if (result && result.descriptor) {
-            const matchResult = matchFaceAgainstPatients(result.descriptor, enrolledPatients, 0.58);
+            const matchResult = await matchPatientFace(Array.from(result.descriptor));
             if (!isFaceScanActiveRef.current || !isContinuousFaceScan) return;
 
             if (matchResult && matchResult.match && matchResult.patient) {
               setScannerStatusText(`PATIENT IDENTIFIED: ${matchResult.patient.full_name} (${matchResult.confidence}%)`);
               confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
 
-              const auditData = {
-                action: 'ER_FACE_SCAN',
-                targetId: matchResult.patient.id,
-                details: `Identified patient ${matchResult.patient.full_name} (${matchResult.confidence}% match). Attending: Dr. ${userProfile?.full_name || 'Physician'}`
-              };
-              await logAuditEntry(auditData);
+              const auditData = { action: 'ER_FACE_SCAN', targetId: matchResult.patient.id, details: `Identified patient ${matchResult.patient.full_name} (${matchResult.confidence}% match). Attending: Dr. ${userProfile?.full_name || 'Physician'}` };
               recordSessionAudit({
                 id: Date.now(),
                 created_at: new Date().toISOString(),
@@ -315,7 +299,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
               });
 
               stopCamera();
-              setSelectedPatient(matchResult.patient);
+              setSelectedPatient({ ...matchResult.patient, _scan_verified: true });
               setShowDossier(true);
               return;
             }
@@ -343,7 +327,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
-  }, [streamActive, enrolledPatients, activeModality, isContinuousFaceScan]);
+  }, [streamActive, activeModality, isContinuousFaceScan]);
 
   // 4. Server-verified platform authenticator lookup (WebAuthn)
   const handleScanHardwareFingerprint = async () => {
@@ -354,7 +338,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     setFpStatusMsg('WAITING FOR WINDOWS HELLO DEVICE VERIFICATION...');
 
     try {
-      const result = await verifyHardwareFingerprint(enrolledPatients);
+      const result = await verifyHardwareFingerprint();
       if (result && result.match && result.patient) {
         setFpSuccessMsg(`VERIFIED: Identified ${result.patient.full_name} via device authenticator`);
         setFpStatusMsg(`MATCH CONFIRMED: ${result.patient.full_name}`);
@@ -374,7 +358,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
           details: auditData.details
         });
 
-        setSelectedPatient(result.patient);
+        setSelectedPatient({ ...result.patient, _scan_verified: true });
         setShowDossier(true);
       } else {
         setFpErrorMsg('Biometric verification failed: No matching enrolled record found.');
@@ -383,7 +367,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     } catch (err) {
       console.warn('Hardware verification error:', err);
       if (err.name === 'NotAllowedError') {
-        setFpErrorMsg('Windows Hello was cancelled or timed out. Retry and complete the device verification prompt.');
+        setFpErrorMsg('Device verification was cancelled or timed out. Complete the fingerprint, face, or screen-lock prompt and retry.');
         setFpStatusMsg('DEVICE AUTHENTICATOR READY');
       } else {
         setFpErrorMsg(err.message || 'Physical biometric verification error.');
@@ -420,7 +404,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
       details: auditData.details
     });
 
-    setSelectedPatient(patient);
+    setSelectedPatient({ ...patient, _scan_verified: false });
     setShowDossier(true);
   };
 
@@ -445,13 +429,6 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                 Your medical account is currently pending activation in Supabase. Run <code>UPDATE public.profiles SET status = 'active' WHERE role = 'doctor';</code> in your Supabase SQL editor to ensure full clearance.
               </p>
             </div>
-            <button
-              onClick={refreshEnrolledPatients}
-              className="corporate-btn-primary !py-1.5 !px-3 !text-xs gap-1.5 flex-shrink-0"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Refresh</span>
-            </button>
           </div>
         </div>
       )}
@@ -460,7 +437,6 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
       {activePage === 'overview' && (
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Enrolled records available</span><ShieldCheck className="h-4 w-4 text-brand-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{enrolledPatients.length}</p><p className="text-[11px] text-slate-500">For authorized identification</p></div>
         <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Session lookups</span><Activity className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{sessionAudits.length}</p><p className="text-[11px] text-slate-500">Scans and manual searches</p></div>
       <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Active method</span><Fingerprint className="h-4 w-4 text-brand-600" /></div><p className="mt-2 text-lg font-bold capitalize text-slate-900">{activeModality === 'fingerprint' ? 'Device authenticator' : 'Face scan'}</p><p className="text-[11px] text-slate-500">Switch between authenticator and face scan</p></div>
       </section>
@@ -557,7 +533,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                   <button
                     type="button"
                     onClick={handleScanHardwareFingerprint}
-                    disabled={isScanningHw || !hasHardwareBiometrics}
+                    disabled={isScanningHw || !webAuthnSupported}
                     className="corporate-btn-emergency !py-3 !px-7 !text-xs gap-2 shadow-lg shadow-emergency-600/30 active:scale-95"
                   >
                     {isScanningHw ? (
@@ -573,7 +549,8 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                     )}
                   </button>
 
-                  {!hasHardwareBiometrics && <p className="mx-auto max-w-sm text-center text-xs text-amber-800">This browser or device has no platform authenticator available. Use a device with Windows Hello, Touch ID, or another passkey authenticator.</p>}
+                  {!hasHardwareBiometrics && webAuthnSupported && <p className="mx-auto max-w-sm text-center text-xs text-amber-800">A built-in sensor was not detected, but you can still try the available passkey options. Android phones can use fingerprint or screen lock.</p>}
+                  {!webAuthnSupported && <p className="mx-auto max-w-sm text-center text-xs text-amber-800">Use a supported browser on the secure HTTPS site to scan with a device passkey.</p>}
 
                   <div className="p-2.5 rounded-xl bg-white/90 border border-slate-200 text-[11px] font-mono text-slate-600 flex items-center gap-2">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -934,6 +911,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
         onClose={() => setShowDossier(false)}
         patient={selectedPatient}
         doctorProfile={userProfile}
+        biometricallyVerified={Boolean(selectedPatient?._scan_verified)}
       />
       </div>
     </div>

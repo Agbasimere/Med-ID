@@ -104,8 +104,11 @@ export async function signUpUser({ email, password, fullName, role = 'patient', 
     }
   }
 
-  // The auth trigger creates an empty patient row. Only the trusted medical team
-  // can write clinical history; patients fill in identity and emergency contacts.
+  let intakeSaved = false;
+  if (session && role === 'patient') {
+    await saveInitialPatientIntake(user.id, patientDetails);
+    intakeSaved = true;
+  }
 
   // 4. Record audit log
   await logAuditEntry({
@@ -114,7 +117,7 @@ export async function signUpUser({ email, password, fullName, role = 'patient', 
     details: `Registered as ${role.toUpperCase()}: ${fullName} (${email})`
   });
 
-  return { user, session };
+  return { user, session, intakeSaved };
 }
 
 export async function signInUser({ email, password }) {
@@ -173,54 +176,77 @@ export async function getUserProfile(userId) {
 // PATIENT OPERATIONS & BIOMETRICS (Using 'patients' table)
 // =========================================================================
 
+export async function saveInitialPatientIntake(patientId, intake = {}) {
+  if (!patientId) throw new Error('Patient account is missing.');
+  const patientIntake = {
+    dob: intake.dob || '',
+    sex: intake.sex || '',
+    blood_type: intake.bloodType || '',
+    genotype: intake.genotype || '',
+    nationality: intake.nationality || '',
+    home_address: intake.homeAddress || '',
+    allergies: intake.allergies || '',
+    conditions: intake.conditions || '',
+    medications: intake.medications || '',
+    surgeries: intake.surgeries || '',
+    medical_history: intake.medicalHistory || '',
+    emerg_name: intake.emergName || '',
+    emerg_phone: intake.emergPhone || '',
+    emerg_email: intake.emergEmail || ''
+  };
+  const { data, error } = await supabaseClient.rpc('medid_submit_patient_intake', { p_intake: patientIntake });
+  if (error) throw error;
+  const { error: consentError } = await supabaseClient.rpc('medid_set_whatsapp_opt_in', { p_enabled: Boolean(intake.whatsappOptIn) });
+  if (consentError) throw consentError;
+  return data;
+}
+
 export async function getPatientData(patientId) {
-  const client = supabaseClient;
   if (!patientId) return null;
+  const { data, error } = await supabaseClient.rpc('medid_get_own_patient_data', { p_patient_id: patientId });
+  if (error) throw error;
+  return data || null;
+}
 
-  const { data: patient, error: pError } = await client
-    .from('patients')
-    .select('*')
-    .eq('id', patientId)
-    .maybeSingle();
+export async function matchPatientFace(descriptor) {
+  const { data, error } = await supabaseClient.functions.invoke('face-match', { body: { descriptor } });
+  if (error) throw error;
+  return data;
+}
 
-  const { data: profile } = await client
-    .from('profiles')
-    .select('full_name, email')
-    .eq('id', patientId)
-    .maybeSingle();
+export async function requestMedicalReport(patientId) {
+  const { data, error } = await supabaseClient.rpc('medid_request_medical_report', { p_patient_id: patientId });
+  if (error) throw error;
+  return data;
+}
 
-  if (pError) {
-    console.warn('Error fetching patient data:', pError);
-  }
+export async function getMedicalReportRequest(patientId) {
+  const { data, error } = await supabaseClient.rpc('medid_get_medical_report_request', { p_patient_id: patientId });
+  if (error) throw error;
+  return data;
+}
 
-  if (!patient && profile) {
-    return {
-      id: patientId,
-      full_name: profile.full_name,
-      email: profile.email,
-      dob: '',
-      blood_type: 'O+',
-      allergies: '',
-      conditions: '',
-      medications: '',
-      emerg_name: '',
-      emerg_phone: '',
-      emerg_email: '',
-      descriptor: null
-    };
-  }
+export async function getPendingMedicalReportRequests() {
+  const { data, error } = await supabaseClient.rpc('medid_admin_pending_medical_report_requests');
+  if (error) throw error;
+  return data || [];
+}
 
-  return patient ? { ...patient, full_name: profile?.full_name || '', email: profile?.email || '' } : null;
+export async function reviewMedicalReportRequest(requestId, decision) {
+  const { data, error } = await supabaseClient.rpc('medid_review_medical_report_request', { p_request_id: requestId, p_decision: decision });
+  if (error) throw error;
+  return data;
+}
+
+export async function sendWhatsAppEmergencyAlert(patientId) {
+  const { data, error } = await supabaseClient.functions.invoke('whatsapp-alert', { body: { patientId } });
+  if (error) throw error;
+  return data;
 }
 
 export async function getPatientMedicalHistory(patientId) {
   if (!patientId) return [];
-  const { data, error } = await supabaseClient
-    .from('patient_medical_history')
-    .select('*')
-    .eq('patient_id', patientId)
-    .order('occurred_at', { ascending: false })
-    .order('created_at', { ascending: false });
+  const { data, error } = await supabaseClient.rpc('medid_get_medical_report', { p_patient_id: patientId });
   if (error) throw error;
   return data || [];
 }
@@ -258,32 +284,20 @@ export async function addPatientMedicalHistoryEntry(patientId, entry) {
 
 export async function updatePatientProfile(patientId, updatePayload) {
   const client = supabaseClient;
+  const editableFields = ['dob', 'sex', 'genotype', 'nationality', 'home_address', 'emerg_name', 'emerg_phone', 'emerg_email'];
+  const profilePayload = Object.fromEntries(editableFields
+    .filter((field) => Object.hasOwn(updatePayload, field))
+    .map((field) => [field, updatePayload[field] ?? '']));
+  if (Object.hasOwn(updatePayload, 'full_name')) profilePayload.full_name = updatePayload.full_name;
 
-  if (updatePayload.full_name) {
-    await client
-      .from('profiles')
-      .update({ full_name: updatePayload.full_name })
-      .eq('id', patientId);
-  }
-
-  const patientRow = {
-    id: patientId,
-    dob: updatePayload.dob || null,
-    emerg_name: updatePayload.emerg_name || '',
-    emerg_phone: updatePayload.emerg_phone || '',
-    emerg_email: updatePayload.emerg_email || '',
-    updated_at: new Date().toISOString()
-  };
-
-  const { data, error } = await client
-    .from('patients')
-    .upsert(patientRow)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Update patient error:', error);
-    throw error;
+  const { error } = await client.rpc('medid_update_own_patient_profile', {
+    p_patient_id: patientId,
+    p_profile: profilePayload
+  });
+  if (error) throw error;
+  if (Object.hasOwn(updatePayload, 'emerg_whatsapp_opt_in')) {
+    const { error: consentError } = await client.rpc('medid_set_whatsapp_opt_in', { p_enabled: Boolean(updatePayload.emerg_whatsapp_opt_in) });
+    if (consentError) throw consentError;
   }
   if (updatePayload.descriptor?.vector) {
     const { error: faceError } = await client.rpc('medid_save_biometrics', {
@@ -296,7 +310,7 @@ export async function updatePatientProfile(patientId, updatePayload) {
     });
     if (faceError) throw faceError;
   }
-  return data;
+  return getPatientData(patientId);
 }
 
 /**
@@ -328,82 +342,16 @@ export async function savePatientBiometrics(patientId, descriptorArray, photoBas
  * Loads all registered patients with biometrics (Face or Fingerprint)
  */
 export async function getEnrolledPatientsForScanner() {
-  const client = supabaseClient;
-
-  const { data: patients, error } = await client
-    .from('patients')
-    .select('*')
-    .not('descriptor', 'is', null);
-
-  if (error) {
-    console.error('Failed to load registered biometrics:', error);
-    return [];
-  }
-
-  if (!patients || patients.length === 0) return [];
-
-  const patientIds = patients.map(p => p.id);
-  const { data: profiles } = await client
-    .from('profiles')
-    .select('id, full_name, email')
-    .in('id', patientIds);
-
-  const profileMap = new Map();
-  (profiles || []).forEach(p => profileMap.set(p.id, p));
-
-  return patients.map(p => {
-    const prof = profileMap.get(p.id);
-    return {
-      ...p,
-      full_name: prof?.full_name || 'Emergency Patient',
-      email: prof?.email || ''
-    };
-  });
+  // Biometric templates are server-side only.
+  return [];
 }
 
 /**
  * Fallback search for doctors by Name, Blood Type, or Allergies
  */
 export async function searchPatients(query) {
-  const client = supabaseClient;
-  if (!query) return [];
-
-  const cleanQuery = query.trim().toLowerCase();
-
-  const { data: profiles } = await client
-    .from('profiles')
-    .select('id, full_name, email')
-    .eq('role', 'patient')
-    .ilike('full_name', `%${cleanQuery}%`);
-
-  const profileIds = (profiles || []).map(p => p.id);
-
-  const { data: patients } = await client
-    .from('patients')
-    .select('*')
-    .or(`allergies.ilike.%${cleanQuery}%,emerg_name.ilike.%${cleanQuery}%,blood_type.ilike.%${cleanQuery}%`);
-
-  const allPatientIds = Array.from(new Set([...profileIds, ...(patients || []).map(p => p.id)]));
-  if (allPatientIds.length === 0) return [];
-
-  const { data: finalPatients } = await client
-    .from('patients')
-    .select('*')
-    .in('id', allPatientIds);
-
-  const { data: finalProfiles } = await client
-    .from('profiles')
-    .select('id, full_name, email')
-    .in('id', allPatientIds);
-
-  const pMap = new Map();
-  (finalProfiles || []).forEach(p => pMap.set(p.id, p));
-
-  return (finalPatients || []).map(p => ({
-    ...p,
-    full_name: pMap.get(p.id)?.full_name || 'Emergency Patient',
-    email: pMap.get(p.id)?.email || ''
-  }));
+  // Unverified name/history lookup bypasses the scan gate and is disabled.
+  return [];
 }
 
 // =========================================================================
@@ -497,20 +445,17 @@ export async function getAdminOverviewData() {
   const client = supabaseClient;
 
   try {
-    const [profilesRes, patientsRes, auditLogsRes, notificationsRes] = await Promise.all([
+    const [profilesRes, auditLogsRes, notificationsRes] = await Promise.all([
       client.from('profiles').select('*').order('created_at', { ascending: false }),
-      client.from('patients').select('*').order('updated_at', { ascending: false }),
       client.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(60),
       client.from('notifications').select('*').order('created_at', { ascending: false }).limit(60)
     ]);
 
     const profiles = profilesRes.data || [];
-    const patients = patientsRes.data || [];
     const doctors = profiles.filter(p => p.role === 'doctor');
 
     return {
       profiles,
-      patients,
       doctors,
       auditLogs: auditLogsRes.data || [],
       notifications: notificationsRes.data || []

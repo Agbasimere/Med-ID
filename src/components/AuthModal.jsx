@@ -10,7 +10,7 @@ import {
   ArrowRight,
   CheckCircle2
 } from 'lucide-react';
-import { signUpUser, signInUser } from '../lib/supabase';
+import { saveInitialPatientIntake, signUpUser, signInUser } from '../lib/supabase';
 
 export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole = 'patient', initialMode = 'signin' }) {
   const [mode, setMode] = useState(initialMode); // 'signin' or 'signup'
@@ -18,15 +18,35 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [intakeDraftActive, setIntakeDraftActive] = useState(false);
 
   // Form Fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [patientDetails, setPatientDetails] = useState({
+    dob: '', sex: '', bloodType: '', genotype: '', nationality: '', homeAddress: '',
+    allergies: '', conditions: '', medications: '', surgeries: '', medicalHistory: '',
+    emergName: '', emergPhone: '', emergEmail: ''
+  });
 
   // Doctor Fields
   const [licenseNumber, setLicenseNumber] = useState('');
   const [hospitalName, setHospitalName] = useState('');
+
+  const setPatientField = (field) => (event) => {
+    setPatientDetails((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  const calculateAge = (dateOfBirth) => {
+    if (!dateOfBirth) return '';
+    const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+    if (Number.isNaN(birthDate.getTime())) return '';
+    const now = new Date();
+    let age = now.getFullYear() - birthDate.getFullYear();
+    if (now.getMonth() < birthDate.getMonth() || (now.getMonth() === birthDate.getMonth() && now.getDate() < birthDate.getDate())) age -= 1;
+    return age >= 0 ? age : '';
+  };
 
   if (!isOpen) return null;
 
@@ -71,7 +91,12 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole 
     try {
       if (mode === 'signin') {
         const res = await signInUser({ email, password });
-        onAuthSuccess(res.user, res.profile, false);
+        let intakeSaved = false;
+        if (intakeDraftActive && res.profile?.role === 'patient') {
+          await saveInitialPatientIntake(res.user.id, patientDetails);
+          intakeSaved = true;
+        }
+        onAuthSuccess(res.user, res.profile, false, intakeDraftActive ? patientDetails : null, intakeSaved);
         onClose();
       } else {
         // Sign up (Patient or Doctor only)
@@ -93,17 +118,18 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole 
           password,
           fullName,
           role,
-          doctorDetails
+          doctorDetails,
+          patientDetails: role === 'patient' ? patientDetails : {}
         });
 
         if (!res.session) {
-          setSuccessMsg('Your account was created. Confirm your email if prompted, then sign in to finish profile setup.');
+          setIntakeDraftActive(role === 'patient');
+          setSuccessMsg('Your account was created. Confirm your email, then sign in here to save your profile details.');
           setMode('signin');
           return;
         }
 
-        // Pass isNewSignup = true so a patient is guided into face verification & medical info
-        onAuthSuccess(res.user, { role, full_name: fullName }, role === 'patient');
+        onAuthSuccess(res.user, { role, full_name: fullName }, role === 'patient', role === 'patient' ? patientDetails : null, res.intakeSaved);
         onClose();
       }
     } catch (err) {
@@ -237,6 +263,76 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole 
                 onChange={(e) => setFullName(e.target.value)}
                 className="corporate-input"
               />
+            </div>
+          )}
+
+          {mode === 'signup' && role === 'patient' && (
+            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 sm:p-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Basic medical information</h3>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Add what you know now. You can update your personal details later; clinical history entries are managed by your care team.</p>
+              </div>
+
+              <section className="space-y-3" aria-label="Personal information">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">Personal information</h4>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="text-[11px] font-semibold text-slate-600">Date of birth
+                    <input type="date" value={patientDetails.dob} onChange={setPatientField('dob')} className="corporate-input mt-1 !px-3 !py-2" />
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Age (calculated)
+                    <input type="text" value={calculateAge(patientDetails.dob)} readOnly placeholder="Enter date of birth" className="corporate-input mt-1 !px-3 !py-2 read-only:bg-slate-100" />
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Sex
+                    <select value={patientDetails.sex} onChange={setPatientField('sex')} className="corporate-input mt-1 !px-3 !py-2">
+                      <option value="">Select if known</option><option value="Female">Female</option><option value="Male">Male</option><option value="Intersex">Intersex</option><option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Blood group
+                    <select value={patientDetails.bloodType} onChange={setPatientField('bloodType')} className="corporate-input mt-1 !px-3 !py-2">
+                      <option value="">Select if known</option>{['A+','A−','B+','B−','AB+','AB−','O+','O−','Unknown'].map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Genotype (optional)
+                    <input type="text" value={patientDetails.genotype} onChange={setPatientField('genotype')} placeholder="e.g. AA, AS" maxLength={20} className="corporate-input mt-1 !px-3 !py-2" />
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Nationality
+                    <input type="text" value={patientDetails.nationality} onChange={setPatientField('nationality')} placeholder="Nationality" maxLength={100} className="corporate-input mt-1 !px-3 !py-2" />
+                  </label>
+                </div>
+                <label className="block text-[11px] font-semibold text-slate-600">Home address
+                  <textarea value={patientDetails.homeAddress} onChange={setPatientField('homeAddress')} rows={2} maxLength={500} placeholder="Street, city, state/region, country" className="corporate-input mt-1 !px-3 !py-2" />
+                </label>
+                <p className="text-[10px] text-slate-500">A profile photo is captured during Face ID setup. Your MED-ID number is generated automatically.</p>
+              </section>
+
+              <section className="space-y-3 border-t border-slate-200 pt-3" aria-label="Medical history information">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">Existing medical information</h4>
+                <p className="text-[10px] text-slate-500">These details are saved as patient-reported information for clinicians to review.</p>
+                {[
+                  ['conditions', 'Existing conditions', 'e.g. diabetes, asthma, epilepsy'],
+                  ['allergies', 'Allergies and reactions', 'e.g. penicillin — rash; peanuts — swelling'],
+                  ['medications', 'Current medications', 'Include medication, dose, and frequency if known'],
+                  ['surgeries', 'Previous surgeries and major treatments', 'Include procedure, year, and hospital if known'],
+                  ['medicalHistory', 'Important medical history', 'Hospital admissions, serious injuries, seizures, fainting, transfusions, or other relevant history']
+                ].map(([field, label, placeholder]) => <label key={field} className="block text-[11px] font-semibold text-slate-600">{label}
+                  <textarea value={patientDetails[field]} onChange={setPatientField(field)} rows={2} maxLength={2000} placeholder={placeholder} className="corporate-input mt-1 !px-3 !py-2" />
+                </label>)}
+              </section>
+
+              <section className="space-y-3 border-t border-slate-200 pt-3" aria-label="Emergency contact information">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">Emergency contact / next of kin</h4>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="text-[11px] font-semibold text-slate-600">Contact name
+                    <input type="text" value={patientDetails.emergName} onChange={setPatientField('emergName')} maxLength={150} className="corporate-input mt-1 !px-3 !py-2" />
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">Mobile phone
+                    <input type="tel" value={patientDetails.emergPhone} onChange={setPatientField('emergPhone')} autoComplete="tel" maxLength={40} placeholder="Include country code" className="corporate-input mt-1 !px-3 !py-2" />
+                  </label>
+                </div>
+                <label className="block text-[11px] font-semibold text-slate-600">Contact email (optional)
+                  <input type="email" value={patientDetails.emergEmail} onChange={setPatientField('emergEmail')} autoComplete="email" maxLength={254} className="corporate-input mt-1 !px-3 !py-2" />
+                </label>
+              </section>
             </div>
           )}
 

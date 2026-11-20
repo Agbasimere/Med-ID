@@ -34,6 +34,17 @@ import FingerprintEnrollmentModal from './FingerprintEnrollmentModal';
 import MedicalHistoryTable from './MedicalHistoryTable';
 import WorkspaceSidebar from './WorkspaceSidebar';
 import WorkspacePageHeader from './WorkspacePageHeader';
+import PatientOnboardingWizard from './PatientOnboardingWizard';
+
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return 'Not provided';
+  const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+  if (Number.isNaN(birthDate.getTime())) return 'Not provided';
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  if (today.getMonth() < birthDate.getMonth() || (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate())) age -= 1;
+  return age >= 0 ? `${age} years` : 'Not provided';
+}
 
 export default function PatientDashboard({ currentUser, userProfile, onOpenAuth }) {
   const [activePage, setActivePage] = useState('overview');
@@ -43,11 +54,16 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
   const [feedbackMsg, setFeedbackMsg] = useState(null);
   const [showFaceModal, setShowFaceModal] = useState(false);
   const [showFingerprintModal, setShowFingerprintModal] = useState(false);
+  const [showIntakeWizard, setShowIntakeWizard] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
   // Form State matching User's Schema
   const [fullName, setFullName] = useState('');
   const [dob, setDob] = useState('');
+  const [sex, setSex] = useState('');
+  const [genotype, setGenotype] = useState('');
+  const [nationality, setNationality] = useState('');
+  const [homeAddress, setHomeAddress] = useState('');
   const [bloodType, setBloodType] = useState('O+');
   const [allergies, setAllergies] = useState('');
   const [conditions, setConditions] = useState('');
@@ -55,6 +71,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
   const [emergName, setEmergName] = useState('');
   const [emergPhone, setEmergPhone] = useState('');
   const [emergEmail, setEmergEmail] = useState('');
+  const [whatsappOptIn, setWhatsappOptIn] = useState(false);
 
   useEffect(() => {
     loadPatientInfo();
@@ -71,8 +88,13 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
       const data = await getPatientData(currentUser.id);
       if (data) {
         setPatient(data);
+        if (!data.intake_completed_at) setShowIntakeWizard(true);
         setFullName(data.full_name || userProfile?.full_name || '');
         setDob(data.dob || '');
+        setSex(data.sex || '');
+        setGenotype(data.genotype || '');
+        setNationality(data.nationality || '');
+        setHomeAddress(data.home_address || '');
         setBloodType(data.blood_type || 'O+');
         setAllergies(data.allergies || '');
         setConditions(data.conditions || '');
@@ -80,6 +102,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
         setEmergName(data.emerg_name || '');
         setEmergPhone(data.emerg_phone || '');
         setEmergEmail(data.emerg_email || '');
+        setWhatsappOptIn(Boolean(data.emerg_whatsapp_opt_in));
       }
 
       // Load ER notifications sent to this patient
@@ -103,9 +126,14 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
       const updated = await updatePatientProfile(currentUser.id, {
         full_name: fullName,
         dob: dob,
+        sex,
+        genotype,
+        nationality,
+        home_address: homeAddress,
         emerg_name: emergName,
         emerg_phone: emergPhone,
-        emerg_email: emergEmail
+        emerg_email: emergEmail,
+        emerg_whatsapp_opt_in: whatsappOptIn
       });
 
       setPatient(prev => ({ ...prev, ...updated, full_name: fullName }));
@@ -162,12 +190,6 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
       <div className="min-w-0 flex-1 space-y-7">
       <WorkspacePageHeader accountType="Patient portal" section={activePage === 'overview' ? 'Overview' : activePage === 'profile' || activePage === 'notifications' ? 'Account' : 'Health records'} title={pageMeta[0]} description={pageMeta[1]} />
       {activePage === 'overview' && <>
-      <section id="patient-overview" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Profile status</span><ShieldCheck className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold capitalize text-slate-900">{userProfile?.status || 'active'}</p><p className="text-[11px] text-slate-500">Personal details are editable</p></div>
-        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Biometric access</span><Fingerprint className="h-4 w-4 text-brand-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{Number(hasFaceBiometrics) + Number(hasFingerprint)} of 2</p><p className="text-[11px] text-slate-500">Face and device credential</p></div>
-        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Emergency alerts</span><Bell className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{notifications.length}</p><p className="text-[11px] text-slate-500">Notifications on your account</p></div>
-      </section>
-      
       {/* Top Banner: Dual-Biometrics Overview (Face & Fingerprint) */}
       <div className="corporate-card p-6 sm:p-8 bg-gradient-to-r from-white via-slate-50 to-brand-50/40 border border-slate-200">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -254,10 +276,21 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
 
         </div>
       </div>
+            <section id="patient-overview" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Profile status</span><ShieldCheck className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold capitalize text-slate-900">{userProfile?.status || 'active'}</p><p className="text-[11px] text-slate-500">Personal details are editable</p></div>
+        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Biometric access</span><Fingerprint className="h-4 w-4 text-brand-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{Number(hasFaceBiometrics) + Number(hasFingerprint)} of 2</p><p className="text-[11px] text-slate-500">Face and device credential</p></div>
+        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Emergency alerts</span><Bell className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{notifications.length}</p><p className="text-[11px] text-slate-500">Notifications on your account</p></div>
+      </section>
       </>}
 
       {/* Save Notification */}
       {activePage === 'profile' && <>
+      <section className="corporate-card grid grid-cols-1 gap-4 border-l-4 border-l-brand-600 bg-gradient-to-r from-white to-brand-50/50 p-5 sm:grid-cols-2 xl:grid-cols-4 xl:items-center">
+        <div><p className="text-[10px] font-bold uppercase tracking-widest text-brand-700">Emergency profile</p><p className="mt-1 text-sm font-semibold text-slate-900">MED-ID digital identity</p></div>
+        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Patient</p><p className="mt-1 text-sm font-bold text-slate-900">{fullName || 'Patient Name'}</p></div>
+        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">MED-ID number</p><p className="mt-1 break-all font-mono text-sm font-semibold text-brand-700">{patient?.med_id_number || `MED-${currentUser.id.replaceAll('-', '').toUpperCase()}`}</p></div>
+        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Blood group</p><p className="mt-1 text-sm font-bold text-rose-700">{bloodType}</p></div>
+      </section>
       {feedbackMsg && (
         <div
           className={`p-4 rounded-xl border text-xs flex items-center gap-2 ${
@@ -282,13 +315,13 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
         <div className="lg:col-span-7 space-y-6">
           
           {/* Identity & Blood Type */}
-          <div className="corporate-card p-6 space-y-4">
+          <div className="corporate-card space-y-4 p-4 sm:p-6">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900 uppercase tracking-wider">
               <Droplet className="w-4 h-4 text-emergency-600" />
               <span>Basic Profile Information</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Full Name
@@ -313,8 +346,60 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
                   className="corporate-input"
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Age</label>
+                <input type="text" value={calculateAge(dob)} readOnly className="corporate-input bg-slate-50" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Sex</label>
+                <select value={sex} onChange={(e) => setSex(e.target.value)} className="corporate-input">
+                  <option value="">Not provided</option><option value="Female">Female</option><option value="Male">Male</option><option value="Intersex">Intersex</option><option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Blood group</label>
+                <input type="text" value={bloodType || 'Not provided'} readOnly className="corporate-input bg-slate-50" />
+                <p className="mt-1 text-[10px] text-slate-500">Contact your care team to correct a blood group record.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Genotype</label>
+                <input type="text" value={genotype} onChange={(e) => setGenotype(e.target.value)} maxLength={20} className="corporate-input" placeholder="e.g. AA, AS" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Nationality</label>
+                <input type="text" value={nationality} onChange={(e) => setNationality(e.target.value)} maxLength={100} className="corporate-input" />
+              </div>
+
+              <div className="sm:col-span-2 xl:col-span-3">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Home address</label>
+                <textarea value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} rows={2} maxLength={500} className="corporate-input" placeholder="Street, city, state/region, country" />
+              </div>
             </div>
           </div>
+
+          <section className="corporate-card space-y-4 p-4 sm:p-6" aria-labelledby="self-reported-history-title">
+            <div>
+              <h3 id="self-reported-history-title" className="text-sm font-bold text-slate-900">Patient-reported medical information</h3>
+              <p className="mt-1 text-xs text-slate-500">Provided during registration for clinicians to review. Updates to clinical records are managed by your care team.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[
+                ['Existing conditions', patient?.conditions || conditions],
+                ['Allergies and reactions', patient?.allergies || allergies],
+                ['Current medications', patient?.medications || medications],
+                ['Previous surgeries and major treatments', patient?.surgeries],
+                ['Important medical history', patient?.medical_history]
+              ].map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                <p className="text-[11px] font-semibold text-slate-600">{label}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-800">{value?.trim() || 'Not provided'}</p>
+              </div>)}
+            </div>
+          </section>
 
         </div>
 
@@ -322,7 +407,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
         <div className="lg:col-span-5 space-y-6">
           
           {/* Emergency Contact Box */}
-          <div className="corporate-card p-6 space-y-4">
+          <div className="corporate-card space-y-4 p-4 sm:p-6">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900 uppercase tracking-wider">
               <PhoneCall className="w-4 h-4 text-emerald-600" />
               <span>Emergency Next of Kin</span>
@@ -347,7 +432,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Contact Mobile Phone
+                  Contact Mobile Phone(s)
                 </label>
                 <input
                   type="tel"
@@ -356,6 +441,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
                   onChange={(e) => setEmergPhone(e.target.value)}
                   className="corporate-input"
                 />
+                <p className="mt-1 text-[10px] text-slate-500">Add multiple numbers separated by commas or semicolons.</p>
               </div>
 
               <div>
@@ -370,6 +456,10 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
                   className="corporate-input"
                 />
               </div>
+              <label className="flex items-start gap-2 text-xs leading-relaxed text-slate-600 sm:col-span-2">
+                <input type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} className="mt-0.5 accent-brand-700" />
+                <span>I confirm my emergency contacts have agreed to receive WhatsApp emergency alerts from my care team.</span>
+              </label>
             </div>
           </div>
 
@@ -384,9 +474,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
                   MED-ID DIGITAL BADGE
                 </span>
               </div>
-              <span className="text-[10px] font-mono font-bold text-brand-700">
-                EMERGENCY PROFILE
-              </span>
+              <span className="text-[10px] font-mono font-bold text-brand-700">PATIENT IDENTIFICATION</span>
             </div>
 
             <div className="flex items-center gap-4 py-2">
@@ -401,7 +489,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
               </div>
               <div>
                 <h4 className="text-base font-bold text-slate-900">{fullName || 'Patient Name'}</h4>
-                <p className="text-xs font-mono text-brand-700 font-bold">Record ID: {currentUser.id.slice(0, 8)}...</p>
+                <p className="break-all text-xs font-mono font-bold text-brand-700">MED-ID: {patient?.med_id_number || `MED-${currentUser.id.replaceAll('-', '').toUpperCase()}`}</p>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-100">
                     BLOOD: {bloodType}
@@ -447,7 +535,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
       {activePage === 'history' &&
       <div id="patient-history"><MedicalHistoryTable patient={patient || {
         id: currentUser.id, full_name: fullName, dob, blood_type: bloodType,
-        allergies, conditions, medications
+        allergies, conditions, medications, patient_reported: true
       }} /></div>
       }
 
@@ -528,6 +616,13 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
           setFeedbackMsg({ type: 'success', text: `Fingerprint enrolled successfully! (${fpTemplate.finger})` });
         }}
       />
+      {showIntakeWizard && currentUser && <PatientOnboardingWizard
+        currentUser={currentUser}
+        onComplete={() => {
+          setShowIntakeWizard(false);
+          loadPatientInfo();
+        }}
+      />}
       </div>
     </div>
   );

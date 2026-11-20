@@ -1,31 +1,46 @@
-import React, { useState } from 'react';
-import { 
-  X,
-  PhoneCall,
-  ShieldCheck,
-  Send,
-  CheckCircle2,
-  Droplet,
-  MessageCircle
-} from 'lucide-react';
-import { dispatchEmergencyNotification, logAuditEntry } from '../lib/supabase';
-import { buildEmergencyWhatsAppUrl } from '../lib/whatsapp';
+import React, { useEffect, useState } from 'react';
+import { X, PhoneCall, ShieldCheck, Send, CheckCircle2, Droplet, MessageCircle } from 'lucide-react';
+import { dispatchEmergencyNotification, getMedicalReportRequest, requestMedicalReport, sendWhatsAppEmergencyAlert } from '../lib/supabase';
 import MedicalHistoryTable from './MedicalHistoryTable';
 
 export default function EmergencyDossierModal({ 
   isOpen, 
   onClose, 
   patient, 
-  doctorProfile 
+  doctorProfile,
+  biometricallyVerified = false
 }) {
   const [dispatching, setDispatching] = useState(false);
   const [alertSent, setAlertSent] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [reportRequest, setReportRequest] = useState(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [whatsappBusy, setWhatsappBusy] = useState(false);
+  const [whatsappSent, setWhatsappSent] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setReportRequest(null);
+    if (isOpen && patient?.id && doctorProfile?.role === 'doctor' && biometricallyVerified) {
+      getMedicalReportRequest(patient.id).then((request) => {
+        if (!active) return;
+        if (request?.status === 'granted' && request.expires_at && new Date(request.expires_at) <= new Date()) {
+          setReportRequest({ ...request, status: 'expired' });
+        } else setReportRequest(request);
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [isOpen, patient?.id, doctorProfile?.role, biometricallyVerified]);
+
+  useEffect(() => {
+    setWhatsappSent(false);
+    setAlertSent(false);
+    setFeedbackMsg('');
+  }, [patient?.id]);
 
   if (!isOpen || !patient) return null;
 
   const photoUrl = patient.descriptor?.photo || null;
-  const whatsappUrl = buildEmergencyWhatsAppUrl({ phone: patient.emerg_phone, patient, senderProfile: doctorProfile });
 
   const calculateAge = (dob) => {
     if (!dob) return 'N/A';
@@ -57,6 +72,25 @@ export default function EmergencyDossierModal({
     } finally {
       setDispatching(false);
     }
+  };
+
+  const handleReportRequest = async () => {
+    setReportBusy(true); setFeedbackMsg('');
+    try {
+      setReportRequest(await requestMedicalReport(patient.id));
+      setFeedbackMsg('Medical report access requested. A super-admin must approve it.');
+    } catch (error) { setFeedbackMsg(error.message || 'Could not request medical report access.'); }
+    finally { setReportBusy(false); }
+  };
+
+  const handleWhatsApp = async () => {
+    setWhatsappBusy(true); setFeedbackMsg('');
+    try {
+      const result = await sendWhatsAppEmergencyAlert(patient.id);
+      setWhatsappSent(result.sent > 0);
+      setFeedbackMsg(`WhatsApp alert sent to ${result.sent} of ${result.total} next-of-kin contact(s).`);
+    } catch (error) { setFeedbackMsg(error.message || 'WhatsApp alert could not be sent.'); }
+    finally { setWhatsappBusy(false); }
   };
 
   return (
@@ -134,9 +168,12 @@ export default function EmergencyDossierModal({
           </div>
         )}
 
-        <div className="my-5">
-          <MedicalHistoryTable patient={patient} canAdd={doctorProfile?.role === 'doctor' && doctorProfile?.status === 'active'} doctorProfile={doctorProfile} />
-        </div>
+        {doctorProfile?.role === 'doctor' && biometricallyVerified && reportRequest?.status !== 'granted' && <div className="my-5 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><h3 className="text-sm font-bold text-slate-900">Medical report access</h3><p className="mt-1 text-xs text-slate-600">The scan revealed the patient's basic profile. Request the clinical report for super-admin approval.</p></div>
+          <button type="button" disabled={reportBusy || reportRequest?.status === 'pending'} onClick={handleReportRequest} className="corporate-btn-brand !py-2 !px-4 !text-xs">{reportBusy ? 'Requesting…' : reportRequest?.status === 'pending' ? 'Awaiting super-admin' : 'Request medical report'}</button>
+        </div>}
+        {reportRequest?.status === 'denied' && <p className="my-4 rounded-lg bg-rose-50 p-3 text-xs text-rose-700">The super-admin denied this report request. You can submit a new request.</p>}
+        {reportRequest?.status === 'granted' && <div className="my-5"><MedicalHistoryTable patient={patient} canAdd={doctorProfile?.role === 'doctor' && doctorProfile?.status === 'active'} doctorProfile={doctorProfile} /></div>}
 
         <div className="mb-5 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs sm:grid-cols-3">
           <p><span className="font-semibold text-slate-500">Next of kin</span><br />{patient.emerg_name || 'Not provided'}</p>
@@ -155,9 +192,9 @@ export default function EmergencyDossierModal({
               <p className="mt-1 text-xs text-slate-500">Prepare an emergency WhatsApp message with the hospital and care-team details.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" onClick={() => logAuditEntry({ action: 'WHATSAPP_ALERT_PREPARED', targetId: patient.id, details: `Opened a pre-filled WhatsApp emergency message for ${patient.emerg_name || 'next of kin'}.` })} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100">
-                <MessageCircle className="h-4 w-4" /><span>Open WhatsApp</span>
-              </a> : <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">Add a valid contact phone to enable WhatsApp</span>}
+              {patient.emerg_phone ? <button type="button" onClick={handleWhatsApp} disabled={whatsappBusy || whatsappSent} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50">
+                <MessageCircle className="h-4 w-4" /><span>{whatsappBusy ? 'Sending…' : whatsappSent ? 'Alert sent' : 'Send WhatsApp alert'}</span>
+              </button> : <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500">Add a valid contact phone to enable WhatsApp</span>}
               <button
                 type="button"
                 onClick={handleDispatchNotification}
@@ -174,7 +211,7 @@ export default function EmergencyDossierModal({
               <p className="truncate text-sm font-bold text-slate-900">{patient.emerg_name || 'Next of kin not provided'}</p>
               <p className="mt-1 truncate text-xs text-slate-500">{patient.emerg_phone || 'No phone number'}{patient.emerg_email ? ` · ${patient.emerg_email}` : ''}</p>
             </div>
-            <p className="max-w-lg text-[11px] leading-relaxed text-slate-500">WhatsApp opens with a pre-filled message. Review it and tap Send in WhatsApp to deliver it.</p>
+            <p className="max-w-lg text-[11px] leading-relaxed text-slate-500">Sends an approved emergency message to the listed next-of-kin WhatsApp numbers.</p>
           </div>
         </section>
 

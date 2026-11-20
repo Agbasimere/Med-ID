@@ -22,26 +22,21 @@ import {
   Sliders,
   Check,
   Droplet,
-  Bell,
-  MessageCircle
+  Bell
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { 
   getAdminOverviewData, 
   updateProfileStatus, 
   updateProfileRole, 
-  logAuditEntry,
-  supabase 
+  getPendingMedicalReportRequests,
+  reviewMedicalReportRequest
 } from '../lib/supabase';
-import EmergencyDossierModal from './EmergencyDossierModal';
 import WorkspaceSidebar from './WorkspaceSidebar';
 import WorkspacePageHeader from './WorkspacePageHeader';
-import { buildEmergencyWhatsAppUrl } from '../lib/whatsapp';
 
 export default function AdminDashboard({ currentUser, userProfile, onOpenAuth }) {
   const [data, setData] = useState({
     profiles: [],
-    patients: [],
     doctors: [],
     auditLogs: [],
     notifications: []
@@ -51,13 +46,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   const [searchFilter, setSearchFilter] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
 
-  // Dossier view
-  const [selectedPatient, setSelectedPatient] = useState(null);
-  const [showDossier, setShowDossier] = useState(false);
-
-  // Seeding feedback
-  const [seeding, setSeeding] = useState(false);
-  const [seedSuccessMsg, setSeedSuccessMsg] = useState('');
+  const [reportRequests, setReportRequests] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -70,6 +59,13 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
       setData(overview);
     }
     setLoading(false);
+    try { setReportRequests(await getPendingMedicalReportRequests()); }
+    catch (error) { console.warn('Medical report approval queue unavailable:', error); }
+  };
+
+  const handleReportReview = async (requestId, decision) => {
+    try { await reviewMedicalReportRequest(requestId, decision); await loadData(); }
+    catch (error) { alert(`Could not ${decision} request: ${error.message}`); }
   };
 
   const handleToggleDoctorStatus = async (profileId, currentStatus) => {
@@ -88,99 +84,6 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
       await loadData();
     } catch (e) {
       alert('Failed to update role: ' + e.message);
-    }
-  };
-
-  // Seed sample patients matching user's exact schema
-  const handleSeedDemoData = async () => {
-    const client = supabase.client;
-    if (!client) {
-      alert('Supabase is not configured yet. Please configure your keys first.');
-      return;
-    }
-
-    setSeeding(true);
-    setSeedSuccessMsg('');
-
-    try {
-      const demoList = [
-        {
-          id: '11111111-1111-4111-8111-111111111111',
-          full_name: 'Alexander J. Wright',
-          email: 'alex.wright@demo-medid.org',
-          dob: '1989-07-22',
-          blood_type: 'O-',
-          allergies: 'Penicillin (Anaphylaxis Risk), Latex',
-          conditions: 'Type 1 Diabetes (Insulin Dependent), Mild Asthma',
-          medications: 'Insulin Glargine, Ventolin Inhaler',
-          emerg_name: 'Sarah Wright (Spouse)',
-          emerg_phone: '+1 (555) 234-8911',
-          emerg_email: 'sarah.w@example.com',
-          photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80'
-        },
-        {
-          id: '22222222-2222-4222-8222-222222222222',
-          full_name: 'Elena Rostova',
-          email: 'elena.rostova@demo-medid.org',
-          dob: '1994-03-14',
-          blood_type: 'A+',
-          allergies: 'Sulfa Drugs, Cephalosporins',
-          conditions: 'Cardiac Arrhythmia',
-          medications: 'Metoprolol 25mg',
-          emerg_name: 'Victor Rostov (Father)',
-          emerg_phone: '+1 (555) 912-4029',
-          emerg_email: 'victor.r@example.com',
-          photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80'
-        },
-        {
-          id: '33333333-3333-4333-8333-333333333333',
-          full_name: 'Marcus Vance',
-          email: 'marcus.vance@demo-medid.org',
-          dob: '1978-11-05',
-          blood_type: 'B+',
-          allergies: 'Peanuts (Severe), Shellfish',
-          conditions: 'Hypertension, Sleep Apnea',
-          medications: 'Lisinopril 10mg',
-          emerg_name: 'Chloe Vance (Daughter)',
-          emerg_phone: '+1 (555) 431-8890',
-          emerg_email: 'chloe.v@example.com',
-          photo: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&auto=format&fit=crop&q=80'
-        }
-      ];
-
-      for (const item of demoList) {
-        // Upsert profile
-        await client.from('profiles').upsert({
-          id: item.id,
-          email: item.email,
-          full_name: item.full_name,
-          role: 'patient',
-          status: 'active'
-        });
-
-        // Upsert patient
-        await client.from('patients').upsert({
-          id: item.id,
-          dob: item.dob,
-          blood_type: item.blood_type,
-          allergies: item.allergies,
-          conditions: item.conditions,
-          medications: item.medications,
-          emerg_name: item.emerg_name,
-          emerg_phone: item.emerg_phone,
-          emerg_email: item.emerg_email,
-          descriptor: { photo: item.photo, vector: null }
-        });
-      }
-
-      await loadData();
-      setSeedSuccessMsg('3 Realistic Demo Patients successfully seeded into your Supabase database!');
-      confetti({ particleCount: 50, spread: 70 });
-    } catch (err) {
-      console.error('Seeding error:', err);
-      alert('Error seeding demo data: ' + err.message);
-    } finally {
-      setSeeding(false);
     }
   };
 
@@ -218,7 +121,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   });
   const adminPageMeta = {
     overview: ['Operations overview', 'Monitor enrollment, credentialing, emergency alerts, and system activity.'],
-    users: ['Patient and staff accounts', 'Search accounts, review role assignments, and inspect patient records.'],
+    users: ['Patient and staff accounts', 'Search accounts and review role assignments.'],
     doctors: ['Doctor credentials', 'Review hospital affiliation, license details, and physician clearance.'],
     audit: ['Audit activity', 'Review and export recorded access and medical record activity.'],
     notifications: ['Emergency alerts', 'Review notifications sent to patient emergency contacts.']
@@ -233,15 +136,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
       <div className="min-w-0 flex-1 space-y-7">
       
       <WorkspacePageHeader accountType="Admin console" section="System management" title={adminPageMeta[0]} description={adminPageMeta[1]} actions={<>
-          <button
-            onClick={handleSeedDemoData}
-            disabled={seeding}
-            className="corporate-btn-secondary !py-2 !px-3.5 !text-xs gap-1.5"
-            title="Seed 3 sample patients with realistic allergies and blood types"
-          >
-            <Database className="w-3.5 h-3.5 text-brand-600" />
-            <span>{seeding ? 'Seeding...' : 'Seed Demo Patients'}</span>
-          </button>
+
 
           <button
             onClick={handleExportAuditLogs}
@@ -261,19 +156,6 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
           </button>
       </>} />
 
-      {/* Seed Success Banner */}
-      {seedSuccessMsg && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between animate-fadeIn">
-          <div className="flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>{seedSuccessMsg}</span>
-          </div>
-          <button onClick={() => setSeedSuccessMsg('')} className="text-slate-400 hover:text-slate-600">
-            <XCircle className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* KPI Cards Strip */}
       {activeTab === 'overview' && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 sm:gap-4">
         
@@ -283,10 +165,10 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
             <Users className="w-4 h-4 text-brand-600" />
           </div>
           <div className="text-2xl font-black text-slate-900">
-            {data.patients.length}
+            {data.profiles.filter(p => p.role === 'patient').length}
           </div>
           <span className="text-[10px] text-emerald-600 font-semibold">
-            {data.patients.filter(p => p.descriptor).length} with Biometrics Active
+            Patient medical and biometric data is withheld
           </span>
         </div>
 
@@ -469,14 +351,10 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
                   <th className="py-2.5 px-3">Status</th>
                   <th className="py-2.5 px-3">Biometrics</th>
                   <th className="py-2.5 px-3">Joined</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredProfiles.map((p) => {
-                  const pat = data.patients.find(pt => pt.id === p.id);
-                  const hasBio = Boolean(pat?.descriptor);
-                  const whatsappUrl = pat ? buildEmergencyWhatsAppUrl({ phone: pat.emerg_phone, patient: { ...pat, full_name: p.full_name }, senderProfile: { ...userProfile, role: 'admin' } }) : '';
                   return (
                     <tr key={p.id} className="hover:bg-slate-50/80">
                       <td className="py-3 px-3 font-bold text-slate-900 flex items-center gap-2">
@@ -511,47 +389,12 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
                         </span>
                       </td>
                       <td className="py-3 px-3">
-                        {p.role === 'patient' ? (
-                          hasBio ? (
-                            <span className="corporate-badge-green text-[10px]">
-                              ✓ Enrolled
-                            </span>
-                          ) : (
-                            <span className="corporate-badge-amber text-[10px]">
-                              Pending
-                            </span>
-                          )
-                        ) : (
+                        {p.role === 'patient' ? <span className="text-slate-500 text-[10px]">Protected</span> : (
                           <span className="text-slate-400 text-[10px]">N/A (Staff)</span>
                         )}
                       </td>
                       <td className="py-3 px-3 text-slate-500 text-[11px]">
                         {new Date(p.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        {pat && (
-                          <div className="flex items-center justify-end gap-3">
-                            {whatsappUrl && <a
-                              href={whatsappUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={() => logAuditEntry({ action: 'WHATSAPP_ALERT_PREPARED', targetId: p.id, details: `Admin opened a pre-filled WhatsApp emergency message for ${pat.emerg_name || 'next of kin'}.` })}
-                              title={`Prepare a WhatsApp emergency message for ${pat.emerg_name || 'next of kin'}`}
-                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100"
-                            >
-                              <MessageCircle className="h-3.5 w-3.5" />WhatsApp
-                            </a>}
-                            <button
-                              onClick={() => {
-                                setSelectedPatient({ ...pat, full_name: p.full_name, email: p.email });
-                                setShowDossier(true);
-                              }}
-                              className="text-brand-600 hover:text-brand-800 font-semibold"
-                            >
-                              Inspect
-                            </button>
-                          </div>
-                        )}
                       </td>
                     </tr>
                   );
@@ -561,6 +404,14 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
           </div>
         </div>
       )}
+
+      {activeTab === 'overview' && <section className="corporate-card space-y-4 p-5">
+        <div><h3 className="text-base font-bold text-slate-900">Medical report access requests</h3><p className="mt-1 text-xs text-slate-500">Approve or deny a clinician's request after their biometric scan.</p></div>
+        {reportRequests.length === 0 ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">No pending requests.</p> : reportRequests.map((request) => <div key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="text-sm font-semibold text-slate-900">{request.doctor_name} requested {request.patient_name}'s medical report</p><p className="mt-1 text-xs text-slate-500">{request.doctor_hospital} · License {request.doctor_license} · {new Date(request.requested_at).toLocaleString()}</p></div>
+          <div className="flex gap-2"><button onClick={() => handleReportReview(request.id, 'denied')} className="corporate-btn-secondary !px-3 !py-2 !text-xs">Deny</button><button onClick={() => handleReportReview(request.id, 'granted')} className="corporate-btn-brand !px-3 !py-2 !text-xs">Grant 24-hour access</button></div>
+        </div>)}
+      </section>}
 
       {/* TAB 3: DOCTOR VERIFICATION */}
       {activeTab === 'doctors' && (
@@ -751,13 +602,6 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
         </div>
       )}
 
-      {/* Dossier Preview Modal */}
-      <EmergencyDossierModal
-        isOpen={showDossier}
-        onClose={() => setShowDossier(false)}
-        patient={selectedPatient}
-        doctorProfile={{ ...userProfile, role: 'admin', full_name: userProfile?.full_name || 'Hospital Administrator' }}
-      />
       </div>
     </div>
   );

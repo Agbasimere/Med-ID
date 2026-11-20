@@ -31,8 +31,8 @@ export default function LandingPage({ onOpenAuth }) {
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl space-y-6 text-center">
           <h1 className="text-4xl font-extrabold leading-[1.15] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-            Unconscious patient.<br />
-            <span className="bg-gradient-to-r from-emergency-600 via-rose-500 to-brand-600 bg-clip-text text-transparent">A clearer path to care.</span>
+            When patients can't speak,<br />
+            <span className="bg-gradient-to-r from-emergency-600 via-rose-500 to-brand-600 bg-clip-text text-transparent">their medical history should.</span>
           </h1>
           <p className="mx-auto max-w-2xl text-base font-normal leading-relaxed text-slate-600 sm:text-lg">
             MED-ID helps authorized emergency teams identify patients, review essential medical information, and reach their listed next of kin.

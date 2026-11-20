@@ -17,22 +17,24 @@ const emptyForm = () => ({
 function legacyRows(patient) {
   const rows = [];
   const add = (category, value) => {
-    const values = Array.isArray(value) ? value : String(value || '').split(',');
+    const values = Array.isArray(value) ? value : String(value || '').split(/[\n,;]+/);
     values.map((item) => String(item).trim()).filter(Boolean).forEach((item) => rows.push({
       id: `profile-${category}-${item}`,
       occurred_at: patient.updated_at?.slice(0, 10) || '',
       category,
       title: item,
-      details: 'Current patient profile',
+      details: 'Patient-reported at signup',
       medication: '', dosage: '', provider: '', facility: '', status: 'Current'
     }));
   };
   add('Allergy', patient.allergies);
   add('Condition', patient.conditions);
   add('Medication', patient.medications);
+  add('Surgery / treatment', patient.surgeries);
+  add('Medical history', patient.medical_history);
   if (patient.blood_type) rows.push({
     id: 'profile-blood-type', occurred_at: patient.updated_at?.slice(0, 10) || '',
-    category: 'Blood type', title: patient.blood_type, details: 'Current patient profile',
+    category: 'Blood type', title: patient.blood_type, details: 'Patient-reported at signup',
     medication: '', dosage: '', provider: '', facility: '', status: 'Current'
   });
   return rows;
@@ -44,6 +46,7 @@ function csvCell(value) {
 
 export default function MedicalHistoryTable({ patient, canAdd = false, doctorProfile }) {
   const [entries, setEntries] = useState([]);
+  const [legacyMedical, setLegacyMedical] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -55,7 +58,11 @@ export default function MedicalHistoryTable({ patient, canAdd = false, doctorPro
     if (!patient?.id) return;
     setLoading(true);
     setLoadError('');
-    try { setEntries(await getPatientMedicalHistory(patient.id)); }
+    try {
+      const report = await getPatientMedicalHistory(patient.id);
+      setEntries(report?.entries || []);
+      setLegacyMedical(report?.legacy || {});
+    }
     catch (error) {
       setLoadError(error.message || 'Could not load the medical history. Apply the medical-history SQL migration, then refresh.');
     } finally { setLoading(false); }
@@ -64,9 +71,9 @@ export default function MedicalHistoryTable({ patient, canAdd = false, doctorPro
   useEffect(() => { refresh(); }, [patient?.id]);
 
   const rows = useMemo(() => [
-    ...legacyRows(patient || {}),
+    ...legacyRows({ ...patient, ...legacyMedical }),
     ...entries.map((entry) => ({ ...entry, id: entry.id }))
-  ].sort((a, b) => String(b.occurred_at || '').localeCompare(String(a.occurred_at || ''))), [patient, entries]);
+  ].sort((a, b) => String(b.occurred_at || '').localeCompare(String(a.occurred_at || ''))), [patient, entries, legacyMedical]);
 
   const updateField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
