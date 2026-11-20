@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  /* Smooth Corporate Containers */
+  .corporate-card {
+    @apply bg-white rounded-2xl border border-slate-200/90 shadow-sm transition-all duration-200 hover:shadow-md;
+  }
+
+  .corporate-card-active {
+    @apply bg-white rounded-2xl border border-brand-200 shadow-md ring-1 ring-brand-500/20;
+  }
+
+  .corporate-input {
+    @apply w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition-all text-sm;
+  }
+
+  .corporate-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 active:scale-[0.98] transition-all shadow-sm text-sm;
+  }
+
+  .corporate-btn-brand {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 text-white font-medium hover:bg-brand-700 active:scale-[0.98] transition-all shadow-sm shadow-brand-500/25 text-sm;
+  }
+
+  .corporate-btn-emergency {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emergency-600 text-white font-semibold hover:bg-emergency-700 active:scale-[0.98] transition-all shadow-md shadow-emergency-600/30 text-sm;
+  }
+
+  .corporate-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-medium hover:bg-slate-200 active:scale-[0.98] transition-all text-sm;
+  }
+
+  .corporate-badge-blue {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200;
+  }
+
+  .corporate-badge-red {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200;
+  }
+
+  .corporate-badge-green {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200;
+  }
+
+  .corporate-badge-amber {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200;
+  }
+}
+
+/* Reticle scan styling for Biometric HUD */
+.scan-reticle {
+  position: relative;
+}
+.scan-reticle::before,
+.scan-reticle::after {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #0284c7;
+  pointer-events: none;
+}
+.scan-reticle::before {
+  top: 0;
+  left: 0;
+  border-top: 3px solid #0284c7;
+  border-left: 3px solid #0284c7;
+  border-top-left-radius: 8px;
+}
+.scan-reticle::after {
+  bottom: 0;
+  right: 0;
+  border-bottom: 3px solid #0284c7;
+  border-right: 3px solid #0284c7;
+  border-bottom-right-radius: 8px;
+}
+
+/* Custom smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
