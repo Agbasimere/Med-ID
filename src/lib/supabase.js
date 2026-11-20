@@ -240,7 +240,23 @@ export async function reviewMedicalReportRequest(requestId, decision) {
 
 export async function sendWhatsAppEmergencyAlert(patientId) {
   const { data, error } = await supabaseClient.functions.invoke('whatsapp-alert', { body: { patientId } });
-  if (error) throw error;
+  if (error) {
+    const response = error.context instanceof Response ? error.context : null;
+    if (response) {
+      let detail = '';
+      try {
+        const payload = await response.clone().json();
+        detail = payload?.error || payload?.message || '';
+      } catch {
+        try { detail = await response.clone().text(); } catch { /* The response body may already be consumed. */ }
+      }
+      throw new Error(detail || `WhatsApp Edge Function returned HTTP ${response.status}.`);
+    }
+    if (error.name === 'FunctionsFetchError' || /failed to send a request to the edge function/i.test(error.message || '')) {
+      throw new Error('Could not reach the whatsapp-alert Edge Function. Deploy it to the Supabase project used by this app, then check that Vercel’s VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY point to that same project.');
+    }
+    throw error;
+  }
   return data;
 }
 

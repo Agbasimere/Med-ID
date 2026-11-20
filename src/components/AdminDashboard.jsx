@@ -47,6 +47,8 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   const [roleFilter, setRoleFilter] = useState('ALL');
 
   const [reportRequests, setReportRequests] = useState([]);
+  const [reportRequestsError, setReportRequestsError] = useState('');
+  const [reportRequestsLoading, setReportRequestsLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -54,13 +56,23 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
 
   const loadData = async () => {
     setLoading(true);
-    const overview = await getAdminOverviewData();
-    if (overview) {
-      setData(overview);
+    setReportRequestsLoading(true);
+    const [overviewResult, requestsResult] = await Promise.allSettled([
+      getAdminOverviewData(),
+      getPendingMedicalReportRequests()
+    ]);
+    if (overviewResult.status === 'fulfilled' && overviewResult.value) {
+      setData(overviewResult.value);
+    }
+    if (requestsResult.status === 'fulfilled') {
+      setReportRequests(requestsResult.value);
+      setReportRequestsError('');
+    } else {
+      console.warn('Medical report approval queue unavailable:', requestsResult.reason);
+      setReportRequestsError(requestsResult.reason?.message || 'Could not load medical report requests.');
     }
     setLoading(false);
-    try { setReportRequests(await getPendingMedicalReportRequests()); }
-    catch (error) { console.warn('Medical report approval queue unavailable:', error); }
+    setReportRequestsLoading(false);
   };
 
   const handleReportReview = async (requestId, decision) => {
@@ -121,6 +133,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   });
   const adminPageMeta = {
     overview: ['Operations overview', 'Monitor enrollment, credentialing, emergency alerts, and system activity.'],
+    'report-requests': ['Medical report requests', 'Review doctor requests for time-limited access to a patient’s medical report.'],
     users: ['Patient and staff accounts', 'Search accounts and review role assignments.'],
     doctors: ['Doctor credentials', 'Review hospital affiliation, license details, and physician clearance.'],
     audit: ['Audit activity', 'Review and export recorded access and medical record activity.'],
@@ -130,7 +143,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   return (
     <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8">
       <WorkspaceSidebar accountType="Administrator" userProfile={userProfile} currentUser={currentUser} activeKey={activeTab} onNavigate={setActiveTab} groups={[
-        { label: 'Administration', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'users', label: 'Accounts', icon: Users, badge: data.profiles.length }, { key: 'doctors', label: 'Doctor credentials', icon: Stethoscope, badge: data.doctors.length }] },
+        { label: 'Administration', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'report-requests', label: 'Medical report requests', icon: Lock, badge: reportRequests.length }, { key: 'users', label: 'Accounts', icon: Users, badge: data.profiles.length }, { key: 'doctors', label: 'Doctor credentials', icon: Stethoscope, badge: data.doctors.length }] },
         { label: 'Account', items: [{ key: 'audit', label: 'Audit activity', icon: ShieldCheck, badge: data.auditLogs.length }, { key: 'notifications', label: 'Emergency alerts', icon: Bell, badge: data.notifications.length }] }
       ]} />
       <div className="min-w-0 flex-1 space-y-7">
@@ -405,9 +418,9 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
         </div>
       )}
 
-      {activeTab === 'overview' && <section className="corporate-card space-y-4 p-5">
-        <div><h3 className="text-base font-bold text-slate-900">Medical report access requests</h3><p className="mt-1 text-xs text-slate-500">Approve or deny a clinician's request after their biometric scan.</p></div>
-        {reportRequests.length === 0 ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">No pending requests.</p> : reportRequests.map((request) => <div key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+      {activeTab === 'report-requests' && <section className="corporate-card space-y-4 p-5">
+        <div><h3 className="text-base font-bold text-slate-900">Pending medical report requests</h3><p className="mt-1 text-xs text-slate-500">Approve or deny a clinician’s request after their biometric scan. Grants expire after 24 hours.</p></div>
+        {reportRequestsError ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><p className="font-semibold">The approval queue could not be loaded.</p><p className="mt-1">{reportRequestsError}</p><p className="mt-2 text-xs">Confirm the medical access migration has been applied to this Supabase project, then refresh.</p></div> : reportRequestsLoading ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">Loading requests…</p> : reportRequests.length === 0 ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">No pending requests.</p> : reportRequests.map((request) => <div key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="text-sm font-semibold text-slate-900">{request.doctor_name} requested {request.patient_name}'s medical report</p><p className="mt-1 text-xs text-slate-500">{request.doctor_hospital} · License {request.doctor_license} · {new Date(request.requested_at).toLocaleString()}</p></div>
           <div className="flex gap-2"><button onClick={() => handleReportReview(request.id, 'denied')} className="corporate-btn-secondary !px-3 !py-2 !text-xs">Deny</button><button onClick={() => handleReportReview(request.id, 'granted')} className="corporate-btn-brand !px-3 !py-2 !text-xs">Grant 24-hour access</button></div>
         </div>)}
