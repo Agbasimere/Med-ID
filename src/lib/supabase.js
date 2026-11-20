@@ -73,7 +73,7 @@ export async function signUpUser({ email, password, fullName, role = 'patient', 
     throw new Error('Doctor license number and hospital name are required.');
   }
 
-  // 1. Sign up user with metadata (trigger handle_new_user automatically inserts into profiles)
+  // 1. Sign up user with metadata (trigger handle_new_user automatically inserts into profiles and patients)
   const { data: authData, error: authError } = await client.auth.signUp({
     email: authEmail,
     password,
@@ -82,7 +82,8 @@ export async function signUpUser({ email, password, fullName, role = 'patient', 
         full_name: fullName,
         role: role,
         license_no: doctorDetails.licenseNo || '',
-        hospital: doctorDetails.hospital || ''
+        hospital: doctorDetails.hospital || '',
+        ...(role === 'patient' ? patientDetails : {})
       }
     }
   });
@@ -214,7 +215,20 @@ export async function getPatientData(patientId) {
 
 export async function matchPatientFace(descriptor) {
   const { data, error } = await supabaseClient.functions.invoke('face-match', { body: { descriptor } });
-  if (error) throw error;
+  if (error) {
+    const response = error.context instanceof Response ? error.context : null;
+    if (response) {
+      let detail = '';
+      try {
+        const payload = await response.clone().json();
+        detail = payload?.error || payload?.message || '';
+      } catch {
+        try { detail = await response.clone().text(); } catch {}
+      }
+      throw new Error(detail || `Face verification returned HTTP ${response.status}.`);
+    }
+    throw error;
+  }
   return data;
 }
 

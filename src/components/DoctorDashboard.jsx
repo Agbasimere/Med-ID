@@ -252,6 +252,27 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     loadPastAudits();
   };
 
+  // Safe Scanner Cancellation and State Reset
+  const handleCancelScan = () => {
+    // 1. Reset hardware passkey verification state
+    setIsScanningHw(false);
+    setFpStatusMsg('BIOMETRIC SENSOR READY');
+    setFpErrorMsg('');
+
+    // 2. Cancel camera feed and facial recognition neural loop
+    cameraRequestIdRef.current += 1;
+    isFaceScanActiveRef.current = false;
+    if (videoRef.current && videoRef.current.srcObject) {
+      stopCameraStream(videoRef.current.srcObject);
+      videoRef.current.srcObject = null;
+    }
+    setStreamActive(false);
+    setIsAnalyzingFace(false);
+    setIsContinuousFaceScan(false);
+    setScannerStatusText('CAMERA STANDBY');
+    setFaceAlert(null);
+  };
+
   // 2. Camera Controls (Face Biometric)
   const startCamera = async (requestedFacingMode = facingMode) => {
     const requestId = ++cameraRequestIdRef.current;
@@ -825,24 +846,35 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleScanHardwareFingerprint}
-                    disabled={isScanningHw || !webAuthnSupported}
-                    className="corporate-btn-emergency !py-3 !px-7 !text-xs gap-2 shadow-lg shadow-emergency-600/30 active:scale-95"
-                  >
-                    {isScanningHw ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Prompting device authenticator...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Fingerprint className="w-4 h-4" />
-        <span>Verify Device Authenticator</span>
-                      </>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleScanHardwareFingerprint}
+                      disabled={isScanningHw || !webAuthnSupported}
+                      className="corporate-btn-emergency !py-3 !px-7 !text-xs gap-2 shadow-lg shadow-emergency-600/30 active:scale-95"
+                    >
+                      {isScanningHw ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Prompting device authenticator...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Fingerprint className="w-4 h-4" />
+                          <span>Verify Device Authenticator</span>
+                        </>
+                      )}
+                    </button>
+                    {isScanningHw && (
+                      <button
+                        type="button"
+                        onClick={handleCancelScan}
+                        className="corporate-btn-secondary !py-3 !px-4 !text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                      >
+                        Cancel Scan
+                      </button>
                     )}
-                  </button>
+                  </div>
 
                   {!hasHardwareBiometrics && webAuthnSupported && <p className="mx-auto max-w-sm text-center text-xs text-amber-800">A built-in sensor was not detected, but you can still try the available passkey options. Android phones can use fingerprint or screen lock.</p>}
                   {!webAuthnSupported && <p className="mx-auto max-w-sm text-center text-xs text-amber-800">Use a supported browser on the secure HTTPS site to scan with a device passkey.</p>}
