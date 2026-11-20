@@ -153,7 +153,7 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
   }[activePage];
 
   return (
-    <div className="mx-auto flex max-w-[96rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:px-8">
+    <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8">
       <WorkspaceSidebar accountType="Patient" userProfile={userProfile} currentUser={currentUser} activeKey={activePage} onNavigate={setActivePage} groups={[
         { label: 'Overview', items: [{ key: 'overview', label: 'Dashboard', icon: Activity }] },
         { label: 'Account', items: [{ key: 'profile', label: 'Basic profile', icon: User }, { key: 'history', label: 'Medical record', icon: FileText }, { key: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.length }] }

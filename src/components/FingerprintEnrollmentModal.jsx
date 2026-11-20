@@ -92,7 +92,7 @@ export default function FingerprintEnrollmentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-      <div className="corporate-card max-w-lg w-full p-6 sm:p-8 relative shadow-2xl border border-slate-200 bg-white text-slate-900">
+      <div className="corporate-card relative max-h-[92dvh] w-full max-w-lg overflow-y-auto border border-slate-200 bg-white p-4 text-slate-900 shadow-2xl sm:p-8">
         
         <button
           onClick={onClose}

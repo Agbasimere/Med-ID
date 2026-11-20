@@ -214,7 +214,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="corporate-card max-w-xl w-full p-6 sm:p-8 max-h-[94vh] overflow-y-auto relative shadow-2xl border border-slate-200">
+      <div className="corporate-card relative max-h-[94dvh] w-full max-w-xl overflow-y-auto border border-slate-200 p-4 shadow-2xl sm:p-8">
         
         {/* Wizard Progress Header */}
         <div className="mb-6">

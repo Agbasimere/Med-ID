@@ -166,7 +166,7 @@ export default function FaceEnrollmentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="corporate-card max-w-lg w-full p-6 sm:p-8 relative shadow-2xl border border-slate-200">
+      <div className="corporate-card relative max-h-[92dvh] w-full max-w-lg overflow-y-auto border border-slate-200 p-4 shadow-2xl sm:p-8">
         
         <button
           onClick={onClose}

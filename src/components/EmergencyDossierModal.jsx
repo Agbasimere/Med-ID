@@ -61,7 +61,7 @@ export default function EmergencyDossierModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="corporate-card max-w-7xl w-full p-5 sm:p-7 max-h-[94vh] overflow-y-auto relative shadow-2xl border border-slate-300">
+      <div className="corporate-card relative max-h-[94dvh] w-full max-w-7xl overflow-y-auto border border-slate-300 p-3 shadow-2xl sm:p-7">
         
         {/* Close Button */}
         <button

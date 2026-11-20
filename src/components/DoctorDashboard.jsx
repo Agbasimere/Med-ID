@@ -425,7 +425,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
   };
 
   return (
-    <div className="mx-auto flex max-w-[96rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:px-8 animate-fadeIn">
+    <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8 animate-fadeIn">
       <WorkspaceSidebar accountType="Doctor" userProfile={userProfile} currentUser={currentUser} activeKey={activePage} onNavigate={(page) => { if (page !== 'scanner' && streamActive) stopCamera(); setActivePage(page); }} groups={[
         { label: 'Clinical workspace', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'scanner', label: 'Patient scanner', icon: Scan }, { key: 'lookup', label: 'Patient lookup', icon: Search }] },
         { label: 'Account', items: [{ key: 'activity', label: 'Audit activity', icon: Clock, badge: sessionAudits.length }] }
@@ -468,11 +468,11 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
       {/* Biometric Modality Switcher (Fingerprint vs Face) */}
       {activePage === 'scanner' && (
-      <div id="doctor-scanner" className="flex p-1 bg-slate-200/80 rounded-2xl max-w-md">
+      <div id="doctor-scanner" className="flex max-w-md flex-col rounded-2xl bg-slate-200/80 p-1 sm:flex-row">
         <button
           type="button"
           onClick={() => handleSwitchModality('fingerprint')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 rounded-xl px-3 py-2.5 text-[11px] font-bold transition-all flex items-center justify-center gap-2 sm:px-4 sm:text-xs ${
             activeModality === 'fingerprint'
               ? 'bg-emergency-600 text-white shadow-sm'
               : 'text-slate-600 hover:text-emergency-600'
@@ -485,7 +485,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
         <button
           type="button"
           onClick={() => handleSwitchModality('face')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 rounded-xl px-3 py-2.5 text-[11px] font-bold transition-all flex items-center justify-center gap-2 sm:px-4 sm:text-xs ${
             activeModality === 'face'
               ? 'bg-white text-brand-700 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
@@ -499,7 +499,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
       )}
       {/* Main Grid: Biometric Scanner HUD & Trauma Fallback Lookup */}
       {(activePage === 'scanner' || activePage === 'lookup') && (
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-12 lg:gap-8">
         
         {/* Left Column: Biometric HUD (8 Cols) */}
         {activePage === 'scanner' && (

@@ -225,7 +225,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   }[activeTab];
 
   return (
-    <div className="mx-auto flex max-w-[96rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:px-8">
+    <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8">
       <WorkspaceSidebar accountType="Administrator" userProfile={userProfile} currentUser={currentUser} activeKey={activeTab} onNavigate={setActiveTab} groups={[
         { label: 'Administration', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'users', label: 'Accounts', icon: Users, badge: data.profiles.length }, { key: 'doctors', label: 'Doctor credentials', icon: Stethoscope, badge: data.doctors.length }] },
         { label: 'Account', items: [{ key: 'audit', label: 'Audit activity', icon: ShieldCheck, badge: data.auditLogs.length }, { key: 'notifications', label: 'Emergency alerts', icon: Bell, badge: data.notifications.length }] }
@@ -275,7 +275,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
       )}
 
       {/* KPI Cards Strip */}
-      {activeTab === 'overview' && <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      {activeTab === 'overview' && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 sm:gap-4">
         
         <div className="corporate-card p-4">
           <div className="flex items-center justify-between text-slate-500 text-xs mb-2">

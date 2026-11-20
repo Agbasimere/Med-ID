@@ -3,7 +3,7 @@ import { Heart, Lock } from 'lucide-react';
 
 export default function Footer() {
   return (
-    <footer className="bg-white border-t border-slate-200/90 mt-20 pt-10 pb-8 text-xs text-slate-500">
+    <footer className="mt-8 border-t border-slate-200/90 bg-white pt-8 pb-8 text-xs text-slate-500 sm:mt-20 sm:pt-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-100">
@@ -21,7 +21,7 @@ export default function Footer() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-medium text-slate-600">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center text-xs font-medium text-slate-600">
             <span>Face identification</span>
             <span>•</span>
             <span>Structured emergency records</span>

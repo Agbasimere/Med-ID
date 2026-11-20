@@ -122,7 +122,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialRole 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-      <div className="corporate-card max-w-md w-full p-6 sm:p-8 max-h-[92vh] overflow-y-auto relative shadow-2xl">
+      <div className="corporate-card relative max-h-[92dvh] w-full max-w-md overflow-y-auto p-4 shadow-2xl sm:p-8">
         
         <button
           onClick={onClose}
