@@ -29,7 +29,8 @@ import {
   updateProfileStatus, 
   updateProfileRole, 
   getPendingMedicalReportRequests,
-  reviewMedicalReportRequest
+  reviewMedicalReportRequest,
+  revokeMedicalReportAccess
 } from '../lib/supabase';
 import WorkspaceSidebar from './WorkspaceSidebar';
 import WorkspacePageHeader from './WorkspacePageHeader';
@@ -49,6 +50,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   const [reportRequests, setReportRequests] = useState([]);
   const [reportRequestsError, setReportRequestsError] = useState('');
   const [reportRequestsLoading, setReportRequestsLoading] = useState(false);
+  const [reportRequestFilter, setReportRequestFilter] = useState('all');
 
   useEffect(() => {
     loadData();
@@ -78,6 +80,12 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   const handleReportReview = async (requestId, decision) => {
     try { await reviewMedicalReportRequest(requestId, decision); await loadData(); }
     catch (error) { alert(`Could not ${decision} request: ${error.message}`); }
+  };
+
+  const handleRevokeReportAccess = async (requestId) => {
+    if (!window.confirm('Revoke this doctor’s active access to the patient’s medical report now?')) return;
+    try { await revokeMedicalReportAccess(requestId); await loadData(); }
+    catch (error) { alert(`Could not revoke access: ${error.message}`); }
   };
 
   const handleToggleDoctorStatus = async (profileId, currentStatus) => {
@@ -143,7 +151,7 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
   return (
     <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8">
       <WorkspaceSidebar accountType="Administrator" userProfile={userProfile} currentUser={currentUser} activeKey={activeTab} onNavigate={setActiveTab} groups={[
-        { label: 'Administration', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'report-requests', label: 'Medical report requests', icon: Lock, badge: reportRequests.length }, { key: 'users', label: 'Accounts', icon: Users, badge: data.profiles.length }, { key: 'doctors', label: 'Doctor credentials', icon: Stethoscope, badge: data.doctors.length }] },
+        { label: 'Administration', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'report-requests', label: 'Medical report requests', icon: Lock, badge: reportRequests.filter((request) => request.status === 'pending').length }, { key: 'users', label: 'Accounts', icon: Users, badge: data.profiles.length }, { key: 'doctors', label: 'Doctor credentials', icon: Stethoscope, badge: data.doctors.length }] },
         { label: 'Account', items: [{ key: 'audit', label: 'Audit activity', icon: ShieldCheck, badge: data.auditLogs.length }, { key: 'notifications', label: 'Emergency alerts', icon: Bell, badge: data.notifications.length }] }
       ]} />
       <div className="min-w-0 flex-1 space-y-7">
@@ -419,11 +427,36 @@ export default function AdminDashboard({ currentUser, userProfile, onOpenAuth })
       )}
 
       {activeTab === 'report-requests' && <section className="corporate-card space-y-4 p-5">
-        <div><h3 className="text-base font-bold text-slate-900">Pending medical report requests</h3><p className="mt-1 text-xs text-slate-500">Approve or deny a clinician’s request after their biometric scan. Grants expire after 24 hours.</p></div>
-        {reportRequestsError ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><p className="font-semibold">The approval queue could not be loaded.</p><p className="mt-1">{reportRequestsError}</p><p className="mt-2 text-xs">Confirm the medical access migration has been applied to this Supabase project, then refresh.</p></div> : reportRequestsLoading ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">Loading requests…</p> : reportRequests.length === 0 ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">No pending requests.</p> : reportRequests.map((request) => <div key={request.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="text-sm font-semibold text-slate-900">{request.doctor_name} requested {request.patient_name}'s medical report</p><p className="mt-1 text-xs text-slate-500">{request.doctor_hospital} · License {request.doctor_license} · {new Date(request.requested_at).toLocaleString()}</p></div>
-          <div className="flex gap-2"><button onClick={() => handleReportReview(request.id, 'denied')} className="corporate-btn-secondary !px-3 !py-2 !text-xs">Deny</button><button onClick={() => handleReportReview(request.id, 'granted')} className="corporate-btn-brand !px-3 !py-2 !text-xs">Grant 24-hour access</button></div>
-        </div>)}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div><h3 className="text-base font-bold text-slate-900">Medical report access</h3><p className="mt-1 text-xs text-slate-500">Requests remain in this register after review. Active grants expire after 24 hours and can be revoked sooner.</p></div>
+          <label className="text-xs font-semibold text-slate-600">Status <select value={reportRequestFilter} onChange={(event) => setReportRequestFilter(event.target.value)} className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2"><option value="all">All requests</option><option value="pending">Pending</option><option value="granted">Granted</option><option value="expired">Expired</option><option value="denied">Denied</option><option value="revoked">Revoked</option></select></label>
+        </div>
+        {reportRequestsError ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><p className="font-semibold">The approval queue could not be loaded.</p><p className="mt-1">{reportRequestsError}</p><p className="mt-2 text-xs">Confirm the medical access migrations have been applied to this Supabase project, then refresh.</p></div> : reportRequestsLoading ? <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">Loading requests…</p> : (() => {
+          const visibleRequests = reportRequests.filter((request) => {
+            const isExpired = request.status === 'granted' && request.expires_at && new Date(request.expires_at) <= new Date();
+            const status = isExpired ? 'expired' : request.status;
+            return reportRequestFilter === 'all' || reportRequestFilter === status;
+          });
+          if (!visibleRequests.length) return <p className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">No {reportRequestFilter === 'all' ? '' : `${reportRequestFilter} `}medical report requests found.</p>;
+          return visibleRequests.map((request) => {
+            const isExpired = request.status === 'granted' && request.expires_at && new Date(request.expires_at) <= new Date();
+            const displayStatus = isExpired ? 'expired' : request.status;
+            const badgeClass = displayStatus === 'granted' ? 'bg-emerald-50 text-emerald-700' : displayStatus === 'pending' ? 'bg-amber-50 text-amber-700' : displayStatus === 'denied' || displayStatus === 'revoked' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600';
+            return <div key={request.id} className="flex flex-col gap-4 rounded-xl border border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-slate-900">{request.doctor_name} · {request.patient_name}</p><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${badgeClass}`}>{displayStatus}</span></div>
+                <p className="text-xs text-slate-500">{request.doctor_hospital} · License {request.doctor_license}</p>
+                <p className="text-xs text-slate-500">Requested {request.requested_at ? new Date(request.requested_at).toLocaleString() : '—'}{request.reviewed_at ? ` · Reviewed ${new Date(request.reviewed_at).toLocaleString()} by ${request.reviewer_name || 'admin'}` : ''}</p>
+                {request.status === 'granted' && <p className={`text-xs font-medium ${isExpired ? 'text-slate-500' : 'text-emerald-700'}`}>{isExpired ? 'Expired' : 'Expires'} {request.expires_at ? new Date(request.expires_at).toLocaleString() : '—'}</p>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {request.status === 'pending' && <><button onClick={() => handleReportReview(request.id, 'denied')} className="corporate-btn-secondary !px-3 !py-2 !text-xs">Deny</button><button onClick={() => handleReportReview(request.id, 'granted')} className="corporate-btn-brand !px-3 !py-2 !text-xs">Grant 24-hour access</button></>}
+                {isExpired && <button onClick={() => handleReportReview(request.id, 'granted')} className="corporate-btn-brand !px-3 !py-2 !text-xs">Renew 24-hour access</button>}
+                {request.status === 'granted' && !isExpired && <button onClick={() => handleRevokeReportAccess(request.id)} className="corporate-btn-secondary !px-3 !py-2 !text-xs">Revoke access</button>}
+              </div>
+            </div>;
+          });
+        })()}
       </section>}
 
       {/* TAB 3: DOCTOR VERIFICATION */}

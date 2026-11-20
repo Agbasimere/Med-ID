@@ -19,7 +19,12 @@ import {
   Fingerprint,
   Info,
   Eye,
-  EyeOff
+  EyeOff,
+  User,
+  ArrowRight,
+  PhoneCall,
+  Calendar,
+  Filter
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -33,14 +38,24 @@ import {
 } from '../lib/fingerprint';
 import { 
   logAuditEntry, 
-  getDoctorAuditTrail, 
+  getDoctorPatientHistory,
   searchPatients,
-  matchPatientFace
+  matchPatientFace,
+  recordBiometricScan
 } from '../lib/supabase';
 import EmergencyDossierModal from './EmergencyDossierModal';
 import WorkspaceSidebar from './WorkspaceSidebar';
 import WorkspacePageHeader from './WorkspacePageHeader';
 import { startCameraStream, stopCameraStream } from '../lib/camera';
+
+function calculateAge(dob) {
+  if (!dob) return 'N/A';
+  const birthDate = new Date(dob);
+  if (Number.isNaN(birthDate.getTime())) return 'N/A';
+  const diff = Date.now() - birthDate.getTime();
+  const ageDate = new Date(diff);
+  return Math.abs(ageDate.getUTCFullYear() - 1970) + ' yrs';
+}
 
 export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }) {
   const [activePage, setActivePage] = useState('overview');
@@ -70,9 +85,11 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
   // Database State (Kept strictly in memory for neural/fingerprint matching, NEVER displayed as a pre-loaded list)
   const [sessionAudits, setSessionAudits] = useState([]);
-  const [auditHistory, setAuditHistory] = useState([]);
-  const [showHistoryArchive, setShowHistoryArchive] = useState(false);
+  const [patientHistory, setPatientHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyFilterQuery, setHistoryFilterQuery] = useState('');
+  const [historyModalityFilter, setHistoryModalityFilter] = useState('all');
 
   // Active Dossier Modal (ONLY opens on genuine biometric match or deliberate manual search selection)
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -84,6 +101,99 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
   const [searching, setSearching] = useState(false);
 
   const isPending = userProfile?.status === 'pending';
+
+  const addPatientToHistory = async (patient, modality = 'face') => {
+    if (!patient || !patient.id) return;
+    const doctorId = currentUser?.id || userProfile?.id;
+
+    try {
+      if (doctorId) {
+        await recordBiometricScan(doctorId, patient.id, modality);
+      }
+    } catch (e) {
+      console.warn('recordBiometricScan notice:', e.message);
+    }
+
+    try {
+      await logAuditEntry({
+        action: modality === 'face' ? 'ER_FACE_SCAN' : modality === 'fingerprint' ? 'ER_FINGERPRINT_SCAN' : 'MANUAL_PATIENT_LOOKUP',
+        targetId: patient.id,
+        details: `Identified patient ${patient.full_name} via ${modality}. Attending: Dr. ${userProfile?.full_name || 'Physician'}`
+      });
+    } catch (e) {
+      console.warn('logAuditEntry notice:', e.message);
+    }
+
+    setPatientHistory(prev => {
+      const existingIdx = prev.findIndex(p => (p.patient_id || p.id) === patient.id);
+      const newEntry = {
+        patient_id: patient.id,
+        id: patient.id,
+        patient_name: patient.full_name,
+        full_name: patient.full_name,
+        patient_email: patient.email || '',
+        dob: patient.dob,
+        sex: patient.sex,
+        blood_type: patient.blood_type || patient.blood_group || 'O+',
+        blood_group: patient.blood_type || patient.blood_group || 'O+',
+        genotype: patient.genotype,
+        nationality: patient.nationality,
+        home_address: patient.home_address,
+        emerg_name: patient.emerg_name,
+        emerg_phone: patient.emerg_phone,
+        emerg_email: patient.emerg_email,
+        med_id_number: patient.med_id_number || `MED-${patient.id.slice(0, 8).toUpperCase()}`,
+        last_scanned_at: new Date().toISOString(),
+        scan_count: existingIdx >= 0 ? (prev[existingIdx].scan_count || 1) + 1 : 1,
+        last_modality: modality === 'face' ? 'Face Scan' : modality === 'fingerprint' ? 'Device Authenticator' : 'Manual Lookup',
+        report_status: 'granted',
+        descriptor: patient.descriptor || null,
+        allergies: patient.allergies,
+        conditions: patient.conditions,
+        medications: patient.medications,
+        surgeries: patient.surgeries,
+        medical_history: patient.medical_history,
+        ...patient
+      };
+
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated.splice(existingIdx, 1);
+        return [newEntry, ...updated];
+      }
+      return [newEntry, ...prev];
+    });
+
+    loadPastAudits();
+  };
+
+  const handleOpenPatientDossier = (entry) => {
+    const patientObj = {
+      id: entry.patient_id || entry.id,
+      full_name: entry.patient_name || entry.full_name || 'Patient',
+      email: entry.patient_email || entry.email || '',
+      dob: entry.dob,
+      sex: entry.sex,
+      blood_type: entry.blood_type || entry.blood_group || 'O+',
+      blood_group: entry.blood_type || entry.blood_group || 'O+',
+      genotype: entry.genotype,
+      nationality: entry.nationality,
+      home_address: entry.home_address,
+      emerg_name: entry.emerg_name,
+      emerg_phone: entry.emerg_phone,
+      emerg_email: entry.emerg_email,
+      med_id_number: entry.med_id_number || `MED-${(entry.patient_id || entry.id || '').slice(0, 8).toUpperCase()}`,
+      descriptor: entry.descriptor || null,
+      allergies: entry.allergies,
+      conditions: entry.conditions,
+      medications: entry.medications,
+      surgeries: entry.surgeries,
+      medical_history: entry.medical_history,
+      _scan_verified: true
+    };
+    setSelectedPatient(patientObj);
+    setShowDossier(true);
+  };
 
   // 1. Initialize Neural Models, Hardware Checks & Load Enrolled Biometrics from Supabase
   useEffect(() => {
@@ -127,9 +237,14 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
   const loadPastAudits = async () => {
     setLoadingHistory(true);
-    const history = await getDoctorAuditTrail(currentUser?.id);
-    setAuditHistory(history);
-    setLoadingHistory(false);
+    try {
+      setPatientHistory(await getDoctorPatientHistory());
+      setHistoryError('');
+    } catch (error) {
+      setHistoryError(error.message || 'Could not load your patient history.');
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const recordSessionAudit = (entry) => {
@@ -233,6 +348,8 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
           details: auditData.details
         });
 
+        await addPatientToHistory(matchResult.patient, 'face');
+
         stopCamera();
         setSelectedPatient({ ...matchResult.patient, _scan_verified: true });
         setShowDossier(true);
@@ -298,6 +415,8 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
                 details: auditData.details
               });
 
+              await addPatientToHistory(matchResult.patient, 'face');
+
               stopCamera();
               setSelectedPatient({ ...matchResult.patient, _scan_verified: true });
               setShowDossier(true);
@@ -358,6 +477,8 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
           details: auditData.details
         });
 
+        await addPatientToHistory(result.patient, 'fingerprint');
+
         setSelectedPatient({ ...result.patient, _scan_verified: true });
         setShowDossier(true);
       } else {
@@ -404,6 +525,8 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
       details: auditData.details
     });
 
+    await addPatientToHistory(patient, 'lookup');
+
     setSelectedPatient({ ...patient, _scan_verified: false });
     setShowDossier(true);
   };
@@ -412,7 +535,7 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
     <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:flex-row lg:px-8 animate-fadeIn">
       <WorkspaceSidebar accountType="Doctor" userProfile={userProfile} currentUser={currentUser} activeKey={activePage} onNavigate={(page) => { if (page !== 'scanner' && streamActive) stopCamera(); setActivePage(page); }} groups={[
         { label: 'Clinical workspace', items: [{ key: 'overview', label: 'Overview', icon: Activity }, { key: 'scanner', label: 'Patient scanner', icon: Scan }, { key: 'lookup', label: 'Patient lookup', icon: Search }] },
-        { label: 'Account', items: [{ key: 'activity', label: 'Audit activity', icon: Clock, badge: sessionAudits.length }] }
+        { label: 'Account', items: [{ key: 'history', label: 'Patient history', icon: Clock, badge: patientHistory.length }] }
       ]} />
       <div className="min-w-0 flex-1 space-y-7">
       
@@ -433,13 +556,185 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
         </div>
       )}
 
-      <WorkspacePageHeader accountType="Doctor workspace" section={userProfile?.hospital || 'Clinical operations'} title={activePage === 'overview' ? 'Clinical overview' : activePage === 'scanner' ? 'Emergency biometric scanner' : activePage === 'lookup' ? 'Patient record lookup' : 'Audit activity'} description={activePage === 'scanner' ? 'Identify an unconscious patient using the available biometric methods.' : activePage === 'lookup' ? 'Search for an authorized patient record by name or emergency contact.' : activePage === 'activity' ? 'Review the lookup and scan activity for this session.' : 'Emergency identification tools and recent clinical activity.'} actions={<div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Stethoscope className="h-4 w-4" /></div><div className="text-xs"><p className="font-bold text-slate-900">{userProfile?.full_name || currentUser?.email || 'ER Attending'}</p><p className="text-[10px] text-slate-500">{userProfile?.hospital || 'Hospital'} · {userProfile?.license_no || 'License pending'}</p></div></div>} />
+      <WorkspacePageHeader accountType="Doctor workspace" section={userProfile?.hospital || 'Clinical operations'} title={activePage === 'overview' ? 'Clinical overview' : activePage === 'scanner' ? 'Emergency biometric scanner' : activePage === 'lookup' ? 'Patient record lookup' : 'Patient history'} description={activePage === 'scanner' ? 'Identify an unconscious patient using the available biometric methods.' : activePage === 'lookup' ? 'Search for an authorized patient record by name or emergency contact.' : activePage === 'history' ? 'Reopen basic details for patients you previously identified and track medical report access.' : 'Emergency identification tools and recent clinical activity.'} actions={<div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50 text-rose-700"><Stethoscope className="h-4 w-4" /></div><div className="text-xs"><p className="font-bold text-slate-900">{userProfile?.full_name || currentUser?.email || 'ER Attending'}</p><p className="text-[10px] text-slate-500">{userProfile?.hospital || 'Hospital'} · {userProfile?.license_no || 'License pending'}</p></div></div>} />
 
       {activePage === 'overview' && (
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Session lookups</span><Activity className="h-4 w-4 text-emerald-600" /></div><p className="mt-2 text-lg font-bold text-slate-900">{sessionAudits.length}</p><p className="text-[11px] text-slate-500">Scans and manual searches</p></div>
-      <div className="corporate-card p-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>Active method</span><Fingerprint className="h-4 w-4 text-brand-600" /></div><p className="mt-2 text-lg font-bold capitalize text-slate-900">{activeModality === 'fingerprint' ? 'Device authenticator' : 'Face scan'}</p><p className="text-[11px] text-slate-500">Switch between authenticator and face scan</p></div>
-      </section>
+        <div className="space-y-6">
+          {/* Top Metric Cards */}
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="corporate-card p-5">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-semibold uppercase tracking-wider">Patients Attended</span>
+                <Clock className="h-4 w-4 text-brand-600" />
+              </div>
+              <p className="mt-2 text-2xl font-black text-slate-900">{patientHistory.length}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Identified via Face or Fingerprint</p>
+            </div>
+
+            <div className="corporate-card p-5">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-semibold uppercase tracking-wider">Session Verifications</span>
+                <Activity className="h-4 w-4 text-emerald-600" />
+              </div>
+              <p className="mt-2 text-2xl font-black text-slate-900">{sessionAudits.length}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Audited biometric events</p>
+            </div>
+
+            <div className="corporate-card p-5">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-semibold uppercase tracking-wider">Scanner Bay Status</span>
+                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              </div>
+              <p className="mt-2 text-base font-bold text-slate-900 capitalize flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{activeModality === 'fingerprint' ? 'Device Authenticator' : 'Facial Camera'}</span>
+              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Client-side biometric matching ready</p>
+            </div>
+          </section>
+
+          {/* Emergency Quick Action Banner */}
+          <div className="corporate-card p-6 bg-gradient-to-r from-brand-50/60 via-white to-slate-50 border border-brand-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="corporate-badge-red text-[10px] font-bold uppercase tracking-wider">
+                  Trauma Bay Ready
+                </span>
+                <span className="text-xs font-bold text-slate-800">Emergency Biometric Recognition</span>
+              </div>
+              <p className="text-xs text-slate-600 max-w-xl">
+                Identify unconscious or critical patients instantly with face recognition or passkey device authenticator. Reopen any previously identified patient without re-scanning.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setActivePage('scanner')}
+                className="corporate-btn-emergency !py-2.5 !px-4 !text-xs gap-2 shadow-sm shadow-emergency-600/20"
+              >
+                <Scan className="w-4 h-4" />
+                <span>Launch Scanner Bay</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('history')}
+                className="corporate-btn-secondary !py-2.5 !px-3.5 !text-xs gap-1.5"
+              >
+                <Clock className="w-4 h-4 text-slate-600" />
+                <span>View Full History ({patientHistory.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Recently Attended Patients Section */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-brand-600" />
+                  <span>Recently Attended Patients</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Quick access to patients you have recently identified. Click "Open Patient Dossier" to view basic triage information or pull cross-hospital medical records.
+                </p>
+              </div>
+              {patientHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActivePage('history')}
+                  className="text-xs font-bold text-brand-600 hover:text-brand-800 flex items-center gap-1 transition-colors"
+                >
+                  <span>View All Attended Patients ({patientHistory.length})</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {patientHistory.length === 0 ? (
+              <div className="corporate-card p-8 text-center space-y-3 bg-slate-50/50">
+                <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 text-slate-400 mx-auto flex items-center justify-center">
+                  <User className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800">No Patients Attended Yet</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                    Patients will appear here immediately after you identify them using facial recognition or the device authenticator.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('scanner')}
+                  className="corporate-btn-brand !py-2 !px-4 !text-xs gap-1.5 inline-flex"
+                >
+                  <Scan className="w-3.5 h-3.5" />
+                  <span>Open Scanner Bay</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {patientHistory.slice(0, 3).map((entry) => {
+                  const photo = entry.descriptor?.photo || null;
+                  const blood = entry.blood_type || entry.blood_group || 'O+';
+                  const name = entry.patient_name || entry.full_name || 'Patient';
+                  const medId = entry.med_id_number || `MED-${(entry.patient_id || entry.id || '').slice(0, 8).toUpperCase()}`;
+
+                  return (
+                    <div 
+                      key={entry.patient_id || entry.id}
+                      className="corporate-card p-4 border border-slate-200 hover:border-brand-300 hover:shadow-md transition-all flex flex-col justify-between space-y-3.5 bg-white"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 flex items-center justify-center text-slate-600 font-bold text-sm">
+                            {photo ? (
+                              <img src={photo} alt={name} className="w-full h-full object-cover" />
+                            ) : (
+                              name[0] || 'P'
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-bold text-slate-900 truncate">{name}</h4>
+                            <p className="text-[11px] font-mono text-brand-600 font-semibold">{medId}</p>
+                          </div>
+                        </div>
+
+                        <span className="corporate-badge-red text-[11px] font-black px-2.5 py-0.5 flex-shrink-0">
+                          {blood}
+                        </span>
+                      </div>
+
+                      <div className="text-[11px] text-slate-600 space-y-1 border-t border-slate-100 pt-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Age / DOB:</span>
+                          <span className="font-semibold text-slate-800">{calculateAge(entry.dob)} · {entry.dob || 'Unknown'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Next of Kin:</span>
+                          <span className="font-semibold text-slate-800 truncate max-w-[140px]">{entry.emerg_name || 'Not set'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Last Identified:</span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            {entry.last_scanned_at ? new Date(entry.last_scanned_at).toLocaleDateString() : 'Recent'} · {entry.last_modality || 'Biometric'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPatientDossier(entry)}
+                        className="corporate-btn-brand !py-2 !px-3 !text-xs w-full justify-center gap-1.5 shadow-sm"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span>Open Patient Dossier</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
       )}
 
       {/* Biometric Modality Switcher (Fingerprint vs Face) */}
@@ -786,123 +1081,286 @@ export default function DoctorDashboard({ currentUser, userProfile, onOpenAuth }
 
       </div>
       )}
-      {/* Active Session Triage Log */}
-      {activePage === 'activity' && (
-      <div id="doctor-audit" className="corporate-card p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className="text-base font-bold text-slate-900">Current Session Triage Log</h3>
-            <p className="text-xs text-slate-500">
-              Emergency scans performed during this active session. Records are cleared on logout.
-            </p>
+      {activePage === 'history' && (
+        <section className="space-y-5">
+          {/* Header Card */}
+          <div className="corporate-card p-5 sm:p-6 bg-white border border-slate-200">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="corporate-badge-blue text-xs uppercase tracking-wider font-bold">
+                    Clinical Archive
+                  </span>
+                  <span className="text-xs text-slate-500 font-mono">
+                    {patientHistory.length} Verified Record{patientHistory.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mt-1 tracking-tight">
+                  Attended Patient History
+                </h3>
+                <p className="mt-1 text-xs text-slate-500 max-w-2xl leading-relaxed">
+                  All patients personally verified by Dr. {userProfile?.full_name || 'Physician'}. Basic identification details are immediately accessible, and you can pull full multi-hospital medical records with zero manual admin intervention.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-shrink-0">
+                <button 
+                  type="button" 
+                  onClick={loadPastAudits} 
+                  disabled={loadingHistory} 
+                  className="corporate-btn-secondary !py-2.5 !px-3.5 !text-xs gap-2"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('scanner')}
+                  className="corporate-btn-emergency !py-2.5 !px-4 !text-xs gap-2 shadow-sm"
+                >
+                  <Scan className="w-3.5 h-3.5" />
+                  <span>New Scan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Filter by name, blood type, MED-ID, next-of-kin..."
+                  value={historyFilterQuery}
+                  onChange={(e) => setHistoryFilterQuery(e.target.value)}
+                  className="corporate-input !pl-9 !py-2 !text-xs w-full"
+                />
+                {historyFilterQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryFilterQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 font-bold px-1"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* Modality Filter Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                <button
+                  type="button"
+                  onClick={() => setHistoryModalityFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                    historyModalityFilter === 'all'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  All ({patientHistory.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setHistoryModalityFilter('face')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    historyModalityFilter === 'face'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Face Scan ({patientHistory.filter(e => (e.last_modality || '').toLowerCase().includes('face')).length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setHistoryModalityFilter('fingerprint')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    historyModalityFilter === 'fingerprint'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Fingerprint className="w-3.5 h-3.5" />
+                  <span>Device Authenticator ({patientHistory.filter(e => {
+                    const m = (e.last_modality || '').toLowerCase();
+                    return m.includes('fingerprint') || m.includes('device') || m.includes('authenticator');
+                  }).length})</span>
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowHistoryArchive(prev => !prev)}
-              className="corporate-btn-secondary !py-1 !px-2.5 !text-xs gap-1.5"
-            >
-              {showHistoryArchive ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-              <span>{showHistoryArchive ? 'Hide Archive' : `Historical Log Archive (${auditHistory.length})`}</span>
-            </button>
-          </div>
-        </div>
+          {/* Error Notice */}
+          {historyError && (
+            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Patient history could not be refreshed.</strong>
+                <p className="mt-0.5">{historyError}</p>
+              </div>
+            </div>
+          )}
 
-        {/* Current Active Session Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[10px] border-y border-slate-200">
-              <tr>
-                <th className="py-2.5 px-3">Timestamp</th>
-                <th className="py-2.5 px-3">Physician</th>
-                <th className="py-2.5 px-3">Modality / Action</th>
-                <th className="py-2.5 px-3">Triage Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {sessionAudits.length > 0 ? (
-                sessionAudits.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">
-                      {new Date(item.created_at).toLocaleTimeString()}
-                    </td>
-                    <td className="py-3 px-3 font-semibold text-slate-800">
-                      {item.actor_email}
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        item.action?.includes('FINGERPRINT')
-                          ? 'bg-cyan-50 text-cyan-800 border border-cyan-200'
-                          : 'bg-brand-50 text-brand-800 border border-brand-200'
-                      }`}>
-                        {item.action}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-slate-600 text-[11px]">
-                      {item.details}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="py-6 text-center text-slate-400 italic">
-                    No emergency scans performed in this current session. Perform a Fingerprint or Face scan to triage an incoming patient.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+          {/* Loading State */}
+          {loadingHistory && (
+            <div className="corporate-card p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
+              <span>Querying verified patient history from Supabase…</span>
+            </div>
+          )}
 
-        {/* Historical Archive (Collapsible) */}
-        {showHistoryArchive && (
-          <div className="mt-6 pt-4 border-t border-slate-200 space-y-3 animate-fadeIn">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Historical Audit Archive ({auditHistory.length} total events)
-              </span>
+          {/* Empty Patient History */}
+          {!loadingHistory && !historyError && patientHistory.length === 0 && (
+            <div className="corporate-card p-10 text-center space-y-4 bg-slate-50/50">
+              <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 text-slate-400 mx-auto flex items-center justify-center shadow-sm">
+                <Clock className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-base font-bold text-slate-800">No Attended Patients Recorded</h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                  When you identify an unconscious or emergency patient with a facial scan or device authenticator, their dossier will be preserved here so you can re-open their details instantly.
+                </p>
+              </div>
               <button
-                onClick={loadPastAudits}
-                className="text-[11px] text-brand-600 hover:text-brand-800 font-medium flex items-center gap-1"
+                type="button"
+                onClick={() => setActivePage('scanner')}
+                className="corporate-btn-emergency !py-2.5 !px-5 !text-xs gap-2 inline-flex"
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Refresh Archive</span>
+                <Scan className="w-4 h-4" />
+                <span>Go to Emergency Scanner</span>
               </button>
             </div>
+          )}
 
-            <div className="overflow-x-auto max-h-60 overflow-y-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-600 uppercase font-semibold text-[10px]">
-                  <tr>
-                    <th className="py-2 px-3">Date & Time</th>
-                    <th className="py-2 px-3">Physician</th>
-                    <th className="py-2 px-3">Action</th>
-                    <th className="py-2 px-3">Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {auditHistory.map((item) => (
-                    <tr key={item.id} className="text-slate-600 text-[11px]">
-                      <td className="py-2 px-3 font-mono text-slate-400 whitespace-nowrap">
-                        {new Date(item.created_at).toLocaleString()}
-                      </td>
-                      <td className="py-2 px-3 font-medium text-slate-700">
-                        {item.actor_email}
-                      </td>
-                      <td className="py-2 px-3">
-                        <span className="font-mono text-[10px] text-slate-600">{item.action}</span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-500">
-                        {item.details}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
+          {/* Filtered Empty State */}
+          {!loadingHistory && patientHistory.length > 0 && (() => {
+            const filtered = patientHistory.filter((entry) => {
+              if (historyModalityFilter === 'face') {
+                const modality = (entry.last_modality || '').toLowerCase();
+                if (!modality.includes('face')) return false;
+              } else if (historyModalityFilter === 'fingerprint') {
+                const modality = (entry.last_modality || '').toLowerCase();
+                if (!modality.includes('fingerprint') && !modality.includes('device') && !modality.includes('authenticator')) return false;
+              }
+
+              if (!historyFilterQuery.trim()) return true;
+              const q = historyFilterQuery.toLowerCase();
+              const name = (entry.patient_name || entry.full_name || '').toLowerCase();
+              const blood = (entry.blood_type || entry.blood_group || '').toLowerCase();
+              const medId = (entry.med_id_number || '').toLowerCase();
+              const emerg = (entry.emerg_name || '').toLowerCase();
+              const phone = (entry.emerg_phone || '').toLowerCase();
+              return name.includes(q) || blood.includes(q) || medId.includes(q) || emerg.includes(q) || phone.includes(q);
+            });
+
+            if (filtered.length === 0) {
+              return (
+                <div className="corporate-card p-8 text-center space-y-3 bg-white">
+                  <Search className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="text-xs text-slate-600">
+                    No attended patients matched your query <strong>"{historyFilterQuery}"</strong>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setHistoryFilterQuery(''); setHistoryModalityFilter('all'); }}
+                    className="corporate-btn-secondary !py-1.5 !px-3 !text-xs inline-flex"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map((entry) => {
+                  const photo = entry.descriptor?.photo || null;
+                  const blood = entry.blood_type || entry.blood_group || 'O+';
+                  const name = entry.patient_name || entry.full_name || 'Patient';
+                  const medId = entry.med_id_number || `MED-${(entry.patient_id || entry.id || '').slice(0, 8).toUpperCase()}`;
+
+                  return (
+                    <article 
+                      key={entry.patient_id || entry.id} 
+                      className="corporate-card p-5 bg-white border border-slate-200 hover:border-brand-300 hover:shadow-lg transition-all flex flex-col justify-between space-y-4"
+                    >
+                      {/* Top Row: Avatar, Name, Blood Badge */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-13 h-13 rounded-2xl bg-slate-100 border-2 border-slate-200 overflow-hidden flex-shrink-0 flex items-center justify-center text-slate-700 font-black text-base shadow-sm">
+                            {photo ? (
+                              <img src={photo} alt={name} className="w-full h-full object-cover" />
+                            ) : (
+                              name[0] || 'P'
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-base font-bold text-slate-900 truncate tracking-tight">{name}</h4>
+                            <p className="text-xs font-mono font-bold text-brand-600">{medId}</p>
+                          </div>
+                        </div>
+
+                        <span className="corporate-badge-red text-xs font-black px-3 py-1 flex-shrink-0 shadow-sm">
+                          {blood}
+                        </span>
+                      </div>
+
+                      {/* Detail Grid */}
+                      <div className="text-xs text-slate-600 bg-slate-50/80 rounded-xl p-3 space-y-1.5 border border-slate-100">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-medium">Age & DOB:</span>
+                          <span className="font-semibold text-slate-800">{calculateAge(entry.dob)} · {entry.dob || 'Unknown'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-medium">Sex / Genotype:</span>
+                          <span className="font-semibold text-slate-800">{entry.sex || 'Not set'} · {entry.genotype || 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-medium">Next of Kin:</span>
+                          <span className="font-semibold text-slate-800 truncate max-w-[150px]">{entry.emerg_name || 'Not recorded'}</span>
+                        </div>
+                        {entry.emerg_phone && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 font-medium">Contact Phone:</span>
+                            <span className="font-mono text-[11px] text-slate-800 font-bold">{entry.emerg_phone}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Scan Metadata Badge */}
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                        <span className="flex items-center gap-1 font-medium text-slate-700">
+                          {entry.last_modality?.toLowerCase().includes('fingerprint') ? (
+                            <Fingerprint className="w-3.5 h-3.5 text-brand-600" />
+                          ) : (
+                            <Camera className="w-3.5 h-3.5 text-emerald-600" />
+                          )}
+                          <span>{entry.last_modality || 'Biometric Verified'}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {entry.last_scanned_at ? new Date(entry.last_scanned_at).toLocaleDateString() : 'Recent'} · {entry.scan_count || 1} scan{(entry.scan_count || 1) === 1 ? '' : 's'}
+                        </span>
+                      </div>
+
+                      {/* Action Button: Open Patient Dossier */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPatientDossier(entry)}
+                        className="corporate-btn-brand !py-2.5 !px-4 !text-xs w-full justify-center gap-2 shadow-sm shadow-brand-600/20 active:scale-98"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span>Open Patient Dossier</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-auto" />
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </section>
       )}
 
       {/* Emergency Dossier Modal */}

@@ -68,6 +68,8 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
   const [allergies, setAllergies] = useState('');
   const [conditions, setConditions] = useState('');
   const [medications, setMedications] = useState('');
+  const [surgeries, setSurgeries] = useState('');
+  const [medicalHistory, setMedicalHistory] = useState('');
   const [emergName, setEmergName] = useState('');
   const [emergPhone, setEmergPhone] = useState('');
   const [emergEmail, setEmergEmail] = useState('');
@@ -88,17 +90,19 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
       const data = await getPatientData(currentUser.id);
       if (data) {
         setPatient(data);
-        if (!data.intake_completed_at) setShowIntakeWizard(true);
+        if (!data.intake_completed_at && !data.descriptor) setShowIntakeWizard(true);
         setFullName(data.full_name || userProfile?.full_name || '');
         setDob(data.dob || '');
         setSex(data.sex || '');
         setGenotype(data.genotype || '');
         setNationality(data.nationality || '');
         setHomeAddress(data.home_address || '');
-        setBloodType(data.blood_type || 'O+');
+        setBloodType(data.blood_type || data.blood_group || 'O+');
         setAllergies(data.allergies || '');
         setConditions(data.conditions || '');
         setMedications(data.medications || '');
+        setSurgeries(data.surgeries || '');
+        setMedicalHistory(data.medical_history || '');
         setEmergName(data.emerg_name || '');
         setEmergPhone(data.emerg_phone || '');
         setEmergEmail(data.emerg_email || '');
@@ -127,17 +131,33 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
         full_name: fullName,
         dob: dob,
         sex,
+        blood_type: bloodType,
         genotype,
         nationality,
         home_address: homeAddress,
+        allergies,
+        conditions,
+        medications,
+        surgeries,
+        medical_history: medicalHistory,
         emerg_name: emergName,
         emerg_phone: emergPhone,
         emerg_email: emergEmail,
         emerg_whatsapp_opt_in: whatsappOptIn
       });
 
-      setPatient(prev => ({ ...prev, ...updated, full_name: fullName }));
-      setFeedbackMsg({ type: 'success', text: 'Basic profile and emergency contact saved.' });
+      setPatient(prev => ({ 
+        ...prev, 
+        ...updated, 
+        full_name: fullName,
+        blood_type: bloodType,
+        conditions,
+        allergies,
+        medications,
+        surgeries,
+        medical_history: medicalHistory
+      }));
+      setFeedbackMsg({ type: 'success', text: 'All basic profile details and medical information have been saved to Supabase!' });
       confetti({ particleCount: 30, spread: 60 });
     } catch (err) {
       console.error('Save error:', err);
@@ -361,8 +381,15 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Blood group</label>
-                <input type="text" value={bloodType || 'Not provided'} readOnly className="corporate-input bg-slate-50" />
-                <p className="mt-1 text-[10px] text-slate-500">Contact your care team to correct a blood group record.</p>
+                <select 
+                  value={bloodType} 
+                  onChange={(e) => setBloodType(e.target.value)} 
+                  className="corporate-input font-bold text-emergency-700"
+                >
+                  {['A+','A−','B+','B−','AB+','AB−','O+','O−','Unknown'].map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -383,21 +410,63 @@ export default function PatientDashboard({ currentUser, userProfile, onOpenAuth 
           </div>
 
           <section className="corporate-card space-y-4 p-4 sm:p-6" aria-labelledby="self-reported-history-title">
-            <div>
-              <h3 id="self-reported-history-title" className="text-sm font-bold text-slate-900">Patient-reported medical information</h3>
-              <p className="mt-1 text-xs text-slate-500">Provided during registration for clinicians to review. Updates to clinical records are managed by your care team.</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 id="self-reported-history-title" className="text-sm font-bold text-slate-900">Patient-Reported Medical Information</h3>
+                <p className="mt-1 text-xs text-slate-500">Edit your allergies, conditions, and treatment history. Click Save below to update your backend records.</p>
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {[
-                ['Existing conditions', patient?.conditions || conditions],
-                ['Allergies and reactions', patient?.allergies || allergies],
-                ['Current medications', patient?.medications || medications],
-                ['Previous surgeries and major treatments', patient?.surgeries],
-                ['Important medical history', patient?.medical_history]
-              ].map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-                <p className="text-[11px] font-semibold text-slate-600">{label}</p>
-                <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-800">{value?.trim() || 'Not provided'}</p>
-              </div>)}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Existing Conditions</label>
+                <textarea 
+                  value={conditions} 
+                  onChange={(e) => setConditions(e.target.value)} 
+                  rows={2} 
+                  placeholder="e.g. Type 1 Diabetes, Asthma, Hypertension" 
+                  className="corporate-input" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Allergies and Reactions</label>
+                <textarea 
+                  value={allergies} 
+                  onChange={(e) => setAllergies(e.target.value)} 
+                  rows={2} 
+                  placeholder="e.g. Penicillin (Anaphylaxis), Peanuts, Shellfish" 
+                  className="corporate-input" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Current Medications</label>
+                <textarea 
+                  value={medications} 
+                  onChange={(e) => setMedications(e.target.value)} 
+                  rows={2} 
+                  placeholder="e.g. Insulin Glargine 20 units daily, Albuterol inhaler" 
+                  className="corporate-input" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Previous Surgeries & Major Treatments</label>
+                <textarea 
+                  value={surgeries} 
+                  onChange={(e) => setSurgeries(e.target.value)} 
+                  rows={2} 
+                  placeholder="e.g. Appendectomy (2021, St. Jude), Knee Arthroscopy (2023)" 
+                  className="corporate-input" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Important Medical History</label>
+                <textarea 
+                  value={medicalHistory} 
+                  onChange={(e) => setMedicalHistory(e.target.value)} 
+                  rows={2} 
+                  placeholder="e.g. Previous ICU admissions, blood transfusions, fainting episodes" 
+                  className="corporate-input" 
+                />
+              </div>
             </div>
           </section>
 

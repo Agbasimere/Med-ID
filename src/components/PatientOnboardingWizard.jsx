@@ -19,7 +19,7 @@ import {
 import { 
   enrollHardwareFingerprint
 } from '../lib/fingerprint';
-import { saveInitialPatientIntake, updatePatientProfile } from '../lib/supabase';
+import { saveInitialPatientIntake, updatePatientProfile, getPatientData } from '../lib/supabase';
 import { startCameraStream, stopCameraStream } from '../lib/camera';
 
 export default function PatientOnboardingWizard({ currentUser, onComplete, initialPatientDetails = null, intakeAlreadySaved = false }) {
@@ -43,22 +43,95 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
   const [errorMsg, setErrorMsg] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Step 3: Basic profile fields patients are permitted to maintain.
+  // Step 3: Basic profile fields pre-populated from initial signup
+  const [fullName, setFullName] = useState(
+    initialPatientDetails?.fullName || initialPatientDetails?.full_name || currentUser?.user_metadata?.full_name || ''
+  );
   const [dob, setDob] = useState(initialPatientDetails?.dob || '');
   const [sex, setSex] = useState(initialPatientDetails?.sex || '');
-  const [bloodType, setBloodType] = useState(initialPatientDetails?.bloodType || '');
+  const [bloodType, setBloodType] = useState(
+    initialPatientDetails?.bloodType || initialPatientDetails?.blood_type || initialPatientDetails?.blood_group || 'O+'
+  );
   const [genotype, setGenotype] = useState(initialPatientDetails?.genotype || '');
   const [nationality, setNationality] = useState(initialPatientDetails?.nationality || '');
-  const [homeAddress, setHomeAddress] = useState(initialPatientDetails?.homeAddress || '');
+  const [homeAddress, setHomeAddress] = useState(
+    initialPatientDetails?.homeAddress || initialPatientDetails?.home_address || ''
+  );
   const [allergies, setAllergies] = useState(initialPatientDetails?.allergies || '');
   const [conditions, setConditions] = useState(initialPatientDetails?.conditions || '');
   const [medications, setMedications] = useState(initialPatientDetails?.medications || '');
   const [surgeries, setSurgeries] = useState(initialPatientDetails?.surgeries || '');
-  const [medicalHistory, setMedicalHistory] = useState(initialPatientDetails?.medicalHistory || '');
-  const [emergName, setEmergName] = useState(initialPatientDetails?.emergName || '');
-  const [emergPhone, setEmergPhone] = useState(initialPatientDetails?.emergPhone || '');
-  const [emergEmail, setEmergEmail] = useState(initialPatientDetails?.emergEmail || '');
-  const [whatsappOptIn, setWhatsappOptIn] = useState(Boolean(initialPatientDetails?.whatsappOptIn));
+  const [medicalHistory, setMedicalHistory] = useState(
+    initialPatientDetails?.medicalHistory || initialPatientDetails?.medical_history || ''
+  );
+  const [emergName, setEmergName] = useState(
+    initialPatientDetails?.emergName || initialPatientDetails?.emerg_name || ''
+  );
+  const [emergPhone, setEmergPhone] = useState(
+    initialPatientDetails?.emergPhone || initialPatientDetails?.emerg_phone || ''
+  );
+  const [emergEmail, setEmergEmail] = useState(
+    initialPatientDetails?.emergEmail || initialPatientDetails?.emerg_email || ''
+  );
+  const [whatsappOptIn, setWhatsappOptIn] = useState(
+    Boolean(initialPatientDetails?.whatsappOptIn || initialPatientDetails?.emerg_whatsapp_opt_in)
+  );
+  const [profileRetrieved, setProfileRetrieved] = useState(Boolean(initialPatientDetails));
+
+  // Retrieve basic profile information entered during initial signup
+  useEffect(() => {
+    async function loadSignupData() {
+      if (initialPatientDetails) {
+        setFullName(prev => prev || initialPatientDetails.fullName || initialPatientDetails.full_name || '');
+        setDob(prev => prev || initialPatientDetails.dob || '');
+        setSex(prev => prev || initialPatientDetails.sex || '');
+        setBloodType(prev => prev || initialPatientDetails.bloodType || initialPatientDetails.blood_type || initialPatientDetails.blood_group || 'O+');
+        setGenotype(prev => prev || initialPatientDetails.genotype || '');
+        setNationality(prev => prev || initialPatientDetails.nationality || '');
+        setHomeAddress(prev => prev || initialPatientDetails.homeAddress || initialPatientDetails.home_address || '');
+        setAllergies(prev => prev || initialPatientDetails.allergies || '');
+        setConditions(prev => prev || initialPatientDetails.conditions || '');
+        setMedications(prev => prev || initialPatientDetails.medications || '');
+        setSurgeries(prev => prev || initialPatientDetails.surgeries || '');
+        setMedicalHistory(prev => prev || initialPatientDetails.medicalHistory || initialPatientDetails.medical_history || '');
+        setEmergName(prev => prev || initialPatientDetails.emergName || initialPatientDetails.emerg_name || '');
+        setEmergPhone(prev => prev || initialPatientDetails.emergPhone || initialPatientDetails.emerg_phone || '');
+        setEmergEmail(prev => prev || initialPatientDetails.emergEmail || initialPatientDetails.emerg_email || '');
+        setWhatsappOptIn(prev => prev || Boolean(initialPatientDetails.whatsappOptIn || initialPatientDetails.emerg_whatsapp_opt_in));
+        setProfileRetrieved(true);
+      }
+
+      // Also retrieve existing saved backend data for this patient
+      if (currentUser?.id) {
+        try {
+          const dbData = await getPatientData(currentUser.id);
+          if (dbData) {
+            if (dbData.full_name) setFullName(dbData.full_name);
+            if (dbData.dob) setDob(dbData.dob);
+            if (dbData.sex) setSex(dbData.sex);
+            if (dbData.blood_type || dbData.blood_group) setBloodType(dbData.blood_type || dbData.blood_group);
+            if (dbData.genotype) setGenotype(dbData.genotype);
+            if (dbData.nationality) setNationality(dbData.nationality);
+            if (dbData.home_address) setHomeAddress(dbData.home_address);
+            if (dbData.allergies) setAllergies(dbData.allergies);
+            if (dbData.conditions) setConditions(dbData.conditions);
+            if (dbData.medications) setMedications(dbData.medications);
+            if (dbData.surgeries) setSurgeries(dbData.surgeries);
+            if (dbData.medical_history) setMedicalHistory(dbData.medical_history);
+            if (dbData.emerg_name) setEmergName(dbData.emerg_name);
+            if (dbData.emerg_phone) setEmergPhone(dbData.emerg_phone);
+            if (dbData.emerg_email) setEmergEmail(dbData.emerg_email);
+            if (dbData.emerg_whatsapp_opt_in) setWhatsappOptIn(Boolean(dbData.emerg_whatsapp_opt_in));
+            setProfileRetrieved(true);
+          }
+        } catch (err) {
+          console.warn('Backend intake fetch error:', err.message);
+        }
+      }
+    }
+
+    loadSignupData();
+  }, [currentUser?.id, initialPatientDetails]);
 
   useEffect(() => {
     if (step === 1) {
@@ -220,12 +293,18 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
       }
 
       await updatePatientProfile(currentUser.id, {
-        full_name: currentUser?.user_metadata?.full_name || '',
+        full_name: fullName || currentUser?.user_metadata?.full_name || '',
         dob,
         sex,
+        blood_type: bloodType,
         genotype,
         nationality,
         home_address: homeAddress,
+        allergies,
+        conditions,
+        medications,
+        surgeries,
+        medical_history: medicalHistory,
         emerg_name: emergName,
         emerg_phone: emergPhone,
         emerg_email: emergEmail,
@@ -489,11 +568,17 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
                 Step 3 of 3: Profile Details
               </span>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                Complete Your Profile
+                Review & Confirm Profile Details
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                Review your date of birth and emergency contact. Your self-reported medical information is saved for clinician review.
+                Your basic registration details have been pre-filled below. Review and adjust any values before proceeding to your dashboard.
               </p>
+            </div>
+
+            {/* Pre-fill Notification Banner */}
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2.5 font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span>Basic profile information retrieved from your signup registration. All rows are pre-filled below.</span>
             </div>
 
             {/* Biometric Status Summary Pill */}
@@ -506,11 +591,25 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
                 <span className="text-emerald-700 font-bold">Face ID Active</span>
                 <span>•</span>
                 {fpTemplate ? (
-                  <span className="text-cyan-700 font-bold">Device authenticator registered</span>
+                  <span className="text-cyan-700 font-bold">Device Authenticator Registered</span>
                 ) : (
                   <span className="text-slate-400">Fingerprint: Skipped</span>
                 )}
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Full Name
+              </label>
+              <input
+                type="text"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="corporate-input !py-2"
+                placeholder="Full Legal Name"
+              />
             </div>
 
             <div>
@@ -619,7 +718,7 @@ export default function PatientOnboardingWizard({ currentUser, onComplete, initi
                 ) : (
                   <>
                     <UserCheck className="w-4 h-4" />
-                    <span>Complete Biometric Registration</span>
+                    <span>Save & Proceed to Dashboard</span>
                   </>
                 )}
               </button>
